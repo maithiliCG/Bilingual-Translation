@@ -28,9 +28,10 @@ export const translateAPI = {
     getStreamUrl: (jobId) => `${API_BASE_URL}/api/translate/${jobId}/stream`,
 
     // Trigger pipeline for pre-uploaded PDF
-    startPipeline: (jobId, targetLanguage) => {
+    startPipeline: (jobId, targetLanguage, translationMode = "bilingual") => {
         const formData = new FormData();
         formData.append('target_language', targetLanguage);
+        formData.append('translation_mode', translationMode);
         return api.post(`/api/translate/${jobId}/start`, formData, {
             headers: { 'Content-Type': 'multipart/form-data' },
         });

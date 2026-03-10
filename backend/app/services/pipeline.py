@@ -43,7 +43,7 @@ class JobStore:
     def __init__(self):
         self._jobs: Dict[str, Dict[str, Any]] = {}
 
-    def create_job(self, job_id: str, pdf_path: str, target_language: str, total_pages: int):
+    def create_job(self, job_id: str, pdf_path: str, target_language: str, total_pages: int, translation_mode: str = "bilingual"):
         import time
         self._jobs[job_id] = {
             "job_id": job_id,
@@ -58,6 +58,7 @@ class JobStore:
             "error": None,
             "created_at": time.time(),
             "completed_at": None,
+            "translation_mode": translation_mode,
         }
 
     def get_job(self, job_id: str) -> Optional[Dict]:
@@ -140,10 +141,12 @@ class Pipeline:
             # Only create job if not already created by /start endpoint (avoid race condition)
             existing = job_store.get_job(job_id)
             if not existing:
-                job_store.create_job(job_id, pdf_path, target_language, total_pages)
+                job_store.create_job(job_id, pdf_path, target_language, total_pages, translation_mode="bilingual")
+                translation_mode = "bilingual"
             else:
                 # Update with fresh page count in case it wasn't set
                 job_store.update_job(job_id, total_pages=total_pages)
+                translation_mode = existing.get("translation_mode", "bilingual")
 
             job_store.update_job(
                 job_id,
@@ -259,6 +262,7 @@ class Pipeline:
                         original_markdown,
                         target_language,
                         page_num,
+                        translation_mode=translation_mode,
                     )
 
                     logger.info(
@@ -283,6 +287,7 @@ class Pipeline:
                             target_language,
                             page_num,
                             figure_detections=figure_detections,
+                            translation_mode=translation_mode,
                         )
                     )
 

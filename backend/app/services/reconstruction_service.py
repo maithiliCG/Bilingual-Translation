@@ -56,47 +56,88 @@ class ReconstructionService:
         target_language_code: str,
         page_number: int = 1,
         figure_detections: list = None,
+        translation_mode: str = "bilingual",
     ) -> str:
         """
         Use Gemini to organize translated content matching original page layout.
-        
-        Args:
-            page_image_bytes: PNG image of the original page
-            translated_markdown: Translated Markdown content
-            layout_details: Layout elements with bounding boxes from GLM-OCR
-            target_language_code: Target language code
-            page_number: Page number for logging
-        
-        Returns:
-            Reconstructed HTML that mirrors the original page layout
         """
         if not translated_markdown or not translated_markdown.strip():
-            # Image-only page: render the entire original page as an image
             b64_img = bytes_to_base64(page_image_bytes)
             return f'<div class="image-page" style="text-align:center;padding:8px;"><img src="data:image/png;base64,{b64_img}" style="max-width:100%;height:auto;" alt="Page {page_number}"></div>'
 
-        # Detect sparse/cover pages — mostly images, logos, barcodes with very little text
-        # Strip markdown image tags to count only actual text content
         import re as _re
-        text_only = _re.sub(r'!\[.*?\]\(.*?\)', '', translated_markdown)  # remove image refs
-        text_only = _re.sub(r'[#*_\-|`>\[\](){}]', '', text_only)  # remove markdown syntax
+        text_only = _re.sub(r'!\[.*?\]\(.*?\)', '', translated_markdown)
+        text_only = _re.sub(r'[#*_\-|`>\[\](){}]', '', text_only)
         text_only = text_only.strip()
-        
-        # Count meaningful words (>2 chars, not just numbers)
         meaningful_words = [w for w in text_only.split() if len(w) > 2 and not w.replace('.', '').replace(',', '').isdigit()]
         
         if len(meaningful_words) < 10:
-            # Very sparse page — mostly images/barcodes/logos, render as full-page image
             logger.info(f"Page {page_number}: Sparse content ({len(meaningful_words)} words), rendering as image")
             b64_img = bytes_to_base64(page_image_bytes)
             return f'<div class="image-page" style="text-align:center;padding:8px;"><img src="data:image/png;base64,{b64_img}" style="max-width:100%;height:auto;" alt="Page {page_number}"></div>'
 
         target_language = get_language_name(target_language_code)
-
-        # Format layout details for the prompt
         layout_summary = self._format_layout_summary(layout_details)
 
-        prompt = f"""You are an expert document layout specialist. Your output HTML will be rendered inside an A4-width container (max-width: 680px, padding: 12px 20px). Design your HTML accordingly.
+        if translation_mode == "monolingual":
+            prompt = f"""You are an expert document layout specialist. Your output HTML will be rendered inside an A4-width container (max-width: 680px, padding: 12px 20px). Design your HTML accordingly.
+
+TASK: Format the ALREADY-TRANSLATED {target_language} content below to match the layout of the attached original page image.
+
+IMPORTANT: The text is ALREADY translated into {target_language}. DO NOT translate it again. Your job is ONLY to:
+1. Organize the {target_language} content to match the original page layout (reading order, sections, columns, spacing).
+2. Convert Markdown to clean HTML, keeping the text tightly coupled in the same structural blocks.
+3. Preserve ALL image tags and convert them to HTML img tags.
+
+CRITICAL — LAYOUT & CONTENT ORDERING:
+1. Look at the attached ORIGINAL PAGE IMAGE carefully.
+2. Output content in EXACTLY the same top-to-bottom reading order as the original image.
+3. DO NOT reorder, skip, or move any content. If the original shows Question 31 before Question 32, your HTML must show them in that exact order.
+4. If the original has a header/title bar at the top, output it FIRST.
+5. TWO-COLUMN LAYOUTS: If the original image is divided into two distinct vertical columns, do NOT just flatten everything into a single long column. Instead, wrap the entire multi-column section in a `<div style="column-count: 2; column-gap: 40px; text-align: justify;">` to replicate the visual two-column flow.
+6. Position each element (text, image, table) in the same relative position as the original. 
+
+HANDLING IMAGES AND TABLES (CRITICAL MULTIMODAL RULE):
+- The input text contains placeholder tags in this format: `![image](crop:[ymin, xmin, ymax, xmax])`
+- Look at the attached ORIGINAL PAGE IMAGE to see exactly what is inside that cropped area.
+- Rule 1 (CHARTS/GRAPHS): If the crop area contains a chart, graph, diagram, geometry figure, or picture, you MUST convert the tag to an HTML img tag:
+  `<img src="crop:[ymin, xmin, ymax, xmax]" style="max-width:80%; height:auto; display:block; margin:10px auto;">`
+- Rule 2 (TABLES): If the crop area contains a DATA TABLE with text/numbers, DO NOT render it as an `<img>`. Instead, output it as a properly styled HTML `<table>` using the translated content.
+- Rule 3: For images, use the EXACT SAME crop coordinates — do NOT change the numbers in the src.
+- Rule 4: NEVER drop, skip, or omit a crop tag. PRESERVE ALL CROP TAGS.
+- Rule 5: Place images/tables in the EXACT same position relative to surrounding text.
+- Rule 6: If you're unsure whether something is a table or image, default to `<img>`.
+
+MATH AND FORMULAS (CRITICAL):
+- Math expressions are already in LaTeX format wrapped in `$...$` or `$$...$$`
+- Keep ALL math expressions EXACTLY as they appear
+- Do NOT modify, unwrap, or translate anything inside `$...$` blocks
+- INLINE MATH: If a math expression or percentage (like `$14\\frac{{2}}{{7}}\\%$` or `12.5%`) appears inside a sentence, keep it INLINE.
+
+LAYOUT RULES:
+1. Each QUESTION block must be wrapped in its own `<div>` with `margin-bottom: 12px; padding: 8px 0;`. Use ONLY margin and padding for spacing. ABSOLUTELY NO border-bottom, NO <hr>, NO horizontal lines, NO separators. 
+2. Question number must be **bold**: `<b>31.</b>`. The question text should immediately follow within the same div.
+3. **MCQ OPTIONS (VISUAL MATCHING & RESPONSIVE LAYOUT)**: Observe how options are arranged in the original image and match that grouping, BUT prioritize space efficiency.
+   - If options are short (1-4 words each), ALWAYS put them in a single row using: `<div style="display: flex; flex-wrap: wrap; gap: 20px; margin-top: 6px;">`
+   - If options are medium length, use a 2x2 grid: `<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 6px;">`
+   - ONLY use vertical stacking if the options are very long sentences.
+4. If the original has a shaded/colored header bar, replicate with `background-color` and `padding`.
+5. **TABLES (GRID LINES)**: Use `<table style="border-collapse:collapse; width:100%; margin:8px 0;">`. Look at the image: ONLY add a 1px solid border to `<td>` and `<th>` elements if visible grid lines exist in the original image.
+6. Use inline CSS only. Font-size: 13px for body text, 15px for headings. Line-height: 1.5.
+7. FORBIDDEN: No `<hr>`, no `border-bottom` on divs. Do NOT insert arbitrary `<br>` or new `<p>` blocks into the middle of a sentence. Let text wrap naturally.
+8. SPACING: Keep spacing compact — match the density of the original page. Don't add excessive whitespace.
+9. **IGNORE HEADERS/LOGOS**: Completely EXCLUDE any institute logos, header blocks, test center names, addresses, or branch lists at the very top or bottom of the original page.
+
+OUTPUT: Raw HTML only. No ```html``` wrapper, no explanations.
+
+EXTRACTED CONTENT:
+---
+{translated_markdown}
+---
+
+HTML:"""
+        else:
+            prompt = f"""You are an expert document layout specialist. Your output HTML will be rendered inside an A4-width container (max-width: 680px, padding: 12px 20px). Design your HTML accordingly.
 
 TASK: Format the BILINGUAL ALREADY-TRANSLATED (English + {target_language}) content below to match the layout of the attached original page image.
 
@@ -161,7 +202,7 @@ HTML ({target_language}):"""
 
         try:
             logger.info(
-                f"Reconstructing page {page_number} layout with Gemini..."
+                f"Reconstructing page {page_number} layout with Gemini (mode: {translation_mode})..."
             )
 
             # Prepare multimodal content: image + text

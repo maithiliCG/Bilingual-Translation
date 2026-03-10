@@ -39,6 +39,7 @@ async def start_translation(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     target_language: str = Form(...),
+    translation_mode: str = Form("bilingual"),
 ):
     """
     Upload a PDF and start the translation pipeline.
@@ -94,6 +95,7 @@ async def start_translation(
         "message": "Translation pipeline started",
         "file_name": file.filename,
         "target_language": get_language_name(target_language),
+        "translation_mode": translation_mode,
         "stream_url": f"/api/translate/{job_id}/stream",
     }
 
@@ -201,7 +203,11 @@ async def get_page_result(job_id: str, page_num: int):
 
 
 @router.post("/{job_id}/start")
-async def trigger_pipeline(job_id: str, target_language: str = Form(...)):
+async def trigger_pipeline(
+    job_id: str,
+    target_language: str = Form(...),
+    translation_mode: str = Form("bilingual"),
+):
     """
     Trigger the pipeline for a pre-uploaded PDF.
     Called after the upload endpoint creates the job.
@@ -218,7 +224,7 @@ async def trigger_pipeline(job_id: str, target_language: str = Form(...)):
     from app.services.pdf_service import PDFService
     pdf_path = str(pdf_files[0])
     total_pages = PDFService.get_page_count(pdf_path)
-    job_store.create_job(job_id, pdf_path, target_language, total_pages)
+    job_store.create_job(job_id, pdf_path, target_language, total_pages, translation_mode=translation_mode)
 
     return {
         "job_id": job_id,

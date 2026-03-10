@@ -10,6 +10,7 @@ import PageViewer from './PageViewer'
 const Dashboard = () => {
   const navigate = useNavigate()
   // Upload state
+  const [activeTab, setActiveTab] = useState('monolingual') // 'monolingual' or 'bilingual'
   const [uploadedFile, setUploadedFile] = useState(null)
   const [selectedLanguage, setSelectedLanguage] = useState('')
   const [languages, setLanguages] = useState([])
@@ -132,6 +133,7 @@ const Dashboard = () => {
       const formData = new FormData()
       formData.append('file', uploadedFile.file)
       formData.append('target_language', selectedLanguage)
+      formData.append('translation_mode', activeTab)
 
       const uploadRes = await translateAPI.uploadAndTranslate(formData)
       const newJobId = uploadRes.data.job_id
@@ -140,7 +142,7 @@ const Dashboard = () => {
       setProgressMessage('PDF uploaded. Starting pipeline...')
 
       // Step 2: Register pipeline
-      await translateAPI.startPipeline(newJobId, selectedLanguage)
+      await translateAPI.startPipeline(newJobId, selectedLanguage, activeTab)
 
       // Step 3: Connect SSE stream
       connectSSE(newJobId)
@@ -378,6 +380,32 @@ const Dashboard = () => {
               transition={{ delay: 0.4 }}
             >
               <div className="bg-gradient-to-b from-[rgba(255,255,255,0.12)] via-[rgba(255,255,255,0.04)] to-[rgba(255,255,255,0.07)] flex flex-col gap-6 sm:gap-8 md:gap-10 items-start pb-4 sm:pb-5 md:pb-6 pt-3 sm:pt-4 px-4 sm:px-5 md:px-6 w-full">
+
+                {/* Tab Switcher */}
+                <div className="flex items-center gap-1 sm:gap-2 bg-[#1a1a1a] border border-[#333333] rounded-full p-1 sm:p-1.5 w-max mb-2">
+                  <button
+                    onClick={() => setActiveTab('monolingual')}
+                    className={`flex items-center gap-2 px-4 py-2 sm:px-5 sm:py-2.5 rounded-full text-xs sm:text-sm font-medium transition-all duration-200 ${
+                      activeTab === 'monolingual'
+                        ? 'bg-[#2a2a2a] text-white border border-[#444444] shadow-sm'
+                        : 'text-[#888888] hover:text-[#cccccc] border border-transparent'
+                    }`}
+                  >
+                    <IoDocument className="w-4 h-4 sm:w-4 sm:h-4" />
+                    PDF Translator
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('bilingual')}
+                    className={`flex items-center gap-2 px-4 py-2 sm:px-5 sm:py-2.5 rounded-full text-xs sm:text-sm font-medium transition-all duration-200 ${
+                      activeTab === 'bilingual'
+                        ? 'bg-[#2a2a2a] text-white border border-[#444444] shadow-sm'
+                        : 'text-[#888888] hover:text-[#cccccc] border border-transparent'
+                    }`}
+                  >
+                    <IoDocument className="w-4 h-4 sm:w-4 sm:h-4" />
+                    Bilingual Translator
+                  </button>
+                </div>
 
                 {/* Upload Section exact matching PDFTranslatorTab */}
                 <div className="flex flex-col gap-4 sm:gap-5 items-start w-full">

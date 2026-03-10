@@ -121,25 +121,27 @@ class TranslationService:
         markdown_content: str,
         target_language_code: str,
         page_number: int = 1,
+        translation_mode: str = "bilingual",
     ) -> str:
         """
-        Translate Markdown content from English to target Indian language.
-        
-        Args:
-            markdown_content: Extracted Markdown from GLM-OCR
-            target_language_code: Language code (e.g., 'te', 'hi')
-            page_number: Page number for logging
-        
-        Returns:
-            Translated Markdown string
+        Dispatcher method that routes to either the monolingual or bilingual translation pipeline.
         """
+        if translation_mode == "monolingual":
+            return await self._translate_monolingual(markdown_content, target_language_code, page_number)
+        else:
+            return await self._translate_bilingual(markdown_content, target_language_code, page_number)
+
+    async def _translate_bilingual(
+        self,
+        markdown_content: str,
+        target_language_code: str,
+        page_number: int = 1,
+    ) -> str:
         if not markdown_content or not markdown_content.strip():
             return ""
 
         markdown_content = self._pre_process_fragments(markdown_content)
-
         target_language = get_language_name(target_language_code)
-
         language_style_note = LANGUAGE_STYLE_NOTES.get(
             target_language,
             f"Use formal written {target_language} as used in government competitive exam papers. Prefer Sanskrit-origin/tatsama vocabulary over colloquial forms."
@@ -161,43 +163,110 @@ TRANSLATION STYLE:
 CRITICAL RULES:
 1. Translate ALL human-readable text to {target_language} — sentences, instructions, directions, question text. Remember to keep the English version and append the {target_language} version right below it.
 2. **MERGE FRAGMENTED SENTENCES (CRITICAL)**: The input OCR text is sometimes fragmented (e.g., "i. If the \\n 1st \\n and \\n 2nd \\n digits..."). You MUST reconstruct and merge these fragments into proper, continuous English sentences BEFORE translating. Output the MERGED, repaired English sentence followed by its translation. Do NOT output fragmented English pieces line-by-line.
-3. **INLINE MATH MUST STAY INLINE**: NEVER isolate inline math, positions (e.g., `16^{{th}}`), or numbers on new lines. They MUST be embedded continuously inside the sentence, both in the English version and the {target_language} version. If a sentence has a number in the middle, DO NOT break the sentence.
+3. **INLINE MATH MUST STAY INLINE**: NEVER isolate inline math, positions (e.g., `16^{{th}}`), or numbers on new lines. They MUST be embedded continuously inside the sentence. If a sentence has a number in the middle, DO NOT break the sentence.
 4. **IGNORE HEADERS/LOGOS**: Completely EXCLUDE any institute names (e.g., 'Sreedhar\\'s CCE'), logos, contact details, phone numbers, or branch addresses at the top or bottom of the page. Do NOT translate or include them in your output. Start directly with the test name, directions, or exam content.
-5. PRESERVE all Markdown formatting exactly (headers, bold, italic, lists, links, table syntax).
 5. **TABLE TRANSLATION**: Tables are critical — follow these rules strictly:
    - PRESERVE the Markdown table pipe syntax EXACTLY: `| header1 | header2 |`, `|---|---|`, `| data1 | data2 |`.
    - Create BILINGUAL cells inside the table by putting the English text and the {target_language} text in the same cell separated by `<br>`.
    - Keep numbers, dates, and abbreviations inside cells unchanged.
    - DO NOT break the table structure — each row must have the same number of `|` pipes.
    - Example: `| Year | Students |` → `| Year<br>సంవత్సరం | Students<br>విద్యార్థులు |` (for Telugu)
-5. **PRESERVE IMAGE TAGS**: Keep ALL image references in the format `![image](crop:[ymin, xmin, ymax, xmax])` EXACTLY as they appear. Do NOT modify, translate, or remove these tags. They are critical for image embedding.
-6. DO NOT translate mathematical symbols, formulas, numbers, dates, measurements, and proper nouns (SBI, RBI, LIC etc.).
+6. PRESERVE all Markdown formatting exactly (headers, bold, italic, lists, links, table syntax).
 7. **MCQ OPTIONS (MULTIPLE CHOICE QUESTIONS)**: For options like `A) Option text` or `1) Option text`, you MUST output BOTH the English version and the {target_language} version. Keep the option label (`A)`, `1)`, etc.) unchanged but attach the translation to it.
    - Example: 
      `A) Rangbang`
      `A) รังบัง` (translation in the target language)
-8. **FIX MATH FRACTIONS**: OCR sometimes badly extracts visual fractions as `33^1 \\underline{{3}}` or `33^1_3`. Fix these into proper LaTeX: `$33\\frac{{1}}{{3}}$`.
-8. **MATH EXPRESSIONS**: Wrap ALL mathematical expressions, equations, and formulas in LaTeX `$...$`. Examples:
+8. **PRESERVE IMAGE TAGS**: Keep ALL image references in the format `![image](crop:[ymin, xmin, ymax, xmax])` EXACTLY as they appear. Do NOT modify, translate, or remove these tags. They are critical for image embedding.
+9. DO NOT translate mathematical symbols, formulas, numbers, dates, measurements, and proper nouns (SBI, RBI, LIC etc.).
+10. **FIX MATH FRACTIONS**: OCR sometimes badly extracts visual fractions as `33^1 \\underline{{3}}` or `33^1_3`. Fix these into proper LaTeX: `$33\\frac{{1}}{{3}}$`.
+11. **MATH EXPRESSIONS**: Wrap ALL mathematical expressions, equations, and formulas in LaTeX `$...$`. Examples:
    - `? × 65 ÷ 72 = 195 × 352 ÷ 192` → `$? \\times 65 \\div 72 = 195 \\times 352 \\div 192$`
    - `√256 × ³√1728 = ? × ⁴√4096` → `$\\sqrt{{256}} \\times \\sqrt[3]{{1728}} = ? \\times \\sqrt[4]{{4096}}$`
    - `35% of 180 + 18² = (27)^(5/3) + ?²` → `$35\\% \\text{{ of }} 180 + 18^2 = (27)^{{5/3}} + ?^2$`
-9. **HYBRID MATH / ENGLISH OPERATORS**: If a mathematical equation contains English connecting words like 'of' (e.g., `35% of 180` or `?% of 135`), DO NOT translate the word 'of' into {target_language}. Treat the entire string as a rigid math formula and wrap it in MathJax: `$35\\% \\text{{ of }} 180$`.
-10. **LITERAL DOLLAR SIGNS**: If you see a literal dollar sign `$` representing money or used in a sequence of symbols (like `3 € $ 1 6 8`), you MUST escape it as `\\$` (e.g., `3 € \\$ 1 6 8`) so it isn't confused with a math block.
-12. PRESERVE the exact order, structure, and spacing of content. Stack the BILINGUAL content as `English Version \n {target_language} Version`. Do not mix them in the same line unless it is inside a table cell.
+12. PRESERVE the exact order, structure, and spacing of content. Stack the BILINGUAL content as `English Version \\n {target_language} Version`. Do not mix them in the same line unless it is inside a table cell.
 13. Keep question numbers (Q1, Q2, 31., 32., etc.) unchanged. Keep one question number for both the English and the target language translation (e.g., `31. ` before the English text, and no number before the translated text).
 14. Output ONLY the BILINGUAL Markdown — no explanations, no wrapping!
+15. **HYBRID MATH / ENGLISH OPERATORS**: If a mathematical equation contains English connecting words like 'of' (e.g., `35% of 180` or `?% of 135`), DO NOT translate the word 'of' into {target_language}. Treat the entire string as a rigid math formula and wrap it in MathJax: `$35\\% \\text{{ of }} 180$`.
+16. **LITERAL DOLLAR SIGNS**: If you see a literal dollar sign `$` representing money or used in a sequence of symbols (like `3 € $ 1 6 8`), you MUST escape it as `\\$` (e.g., `3 € \\$ 1 6 8`) so it isn't confused with a math block.
 
-MARKDOWN CONTENT TO TRANSLATE:
+MARKDOWN CONTENT TO TRANSLATE (BILINGUAL MODE):
 ---
 {markdown_content}
 ---
 
-TRANSLATED CONTENT IN {target_language}:"""
+TRANSLATED CONTENT IN BILINGUAL FORMAT:"""
 
+        return await self._execute_translation_call(prompt, page_number, target_language, len(markdown_content))
+
+
+    async def _translate_monolingual(
+        self,
+        markdown_content: str,
+        target_language_code: str,
+        page_number: int = 1,
+    ) -> str:
+        if not markdown_content or not markdown_content.strip():
+            return ""
+
+        markdown_content = self._pre_process_fragments(markdown_content)
+        target_language = get_language_name(target_language_code)
+        language_style_note = LANGUAGE_STYLE_NOTES.get(
+            target_language,
+            f"Use formal written {target_language} as used in government competitive exam papers. Prefer Sanskrit-origin/tatsama vocabulary over colloquial forms."
+        )
+
+        prompt = f"""You are an expert translator specializing in translating English educational/exam documents to {target_language}.
+
+TASK: Translate the following extracted Markdown content from English to {target_language}.
+However, instead of returning bilingual text, you must generate a document ONLY in {target_language}. Do NOT include the original English text in the output.
+
+TRANSLATION STYLE:
+- Generate {target_language} in FORMAL COMPETITIVE EXAMINATION style used in SSC/Banking/State PSC exams.
+- Use standard written {target_language}. Avoid conversational or spoken tone.
+- {language_style_note}
+- Avoid literal word-by-word translation. Use structured exam phrasing that sounds natural in {target_language}.
+- Technical terms commonly used in exams (like "compound interest", "ratio", "percentage") should use the standard {target_language} equivalents used in government exam papers.
+
+CRITICAL RULES:
+1. Translate ALL human-readable text to {target_language} — sentences, instructions, directions, question text. REPLACE the English text entirely with the {target_language} text.
+2. **MERGE FRAGMENTED SENTENCES (CRITICAL)**: The input OCR text is sometimes fragmented. You MUST reconstruct and merge these fragments into proper, continuous sentences BEFORE translating. Output ONLY the properly MERGED and TRANSLATED sentence in {target_language}.
+3. **INLINE MATH MUST STAY INLINE**: NEVER isolate inline math, positions (e.g., `16^{{th}}`), or numbers on new lines. They MUST be embedded continuously inside the sentence. If a sentence has a number in the middle, DO NOT break the sentence.
+4. **IGNORE HEADERS/LOGOS**: Completely EXCLUDE any institute names (e.g., 'Sreedhar\\'s CCE'), logos, contact details, phone numbers, or branch addresses at the top or bottom of the page. Do NOT translate or include them in your output. Start directly with the test name, directions, or exam content.
+5. **TABLE TRANSLATION**: Tables are critical — follow these rules strictly:
+   - PRESERVE the Markdown table pipe syntax EXACTLY: `| header1 | header2 |`, `|---|---|`, `| data1 | data2 |`.
+   - Create cells with ONLY the {target_language} text. DO NOT include English text.
+   - Example: `| Year | Students |` → `| సంవత్సరం | విద్యార్థులు |` (for Telugu)
+6. PRESERVE all Markdown formatting exactly (headers, bold, italic, lists, links, table syntax).
+7. **MCQ OPTIONS (MULTIPLE CHOICE QUESTIONS)**: For options like `A) Option text` or `1) Option text`, you MUST output ONLY the {target_language} version. Keep the option label (`A)`, `1)`, etc.) unchanged.
+   - Example: `A) Rangbang` → `A) รังบัง` (translation in the target language)
+8. **PRESERVE IMAGE TAGS**: Keep ALL image references in the format `![image](crop:[ymin, xmin, ymax, xmax])` EXACTLY as they appear. Do NOT modify, translate, or remove these tags. They are critical for image embedding.
+9. DO NOT translate mathematical symbols, formulas, numbers, dates, measurements, and proper nouns (SBI, RBI, LIC etc.).
+10. **FIX MATH FRACTIONS**: OCR sometimes badly extracts visual fractions as `33^1 \\underline{{3}}` or `33^1_3`. Fix these into proper LaTeX: `$33\\frac{{1}}{{3}}$`.
+11. **MATH EXPRESSIONS**: Wrap ALL mathematical expressions, equations, and formulas in LaTeX `$...$`. Examples:
+   - `? × 65 ÷ 72 = 195 × 352 ÷ 192` → `$? \\times 65 \\div 72 = 195 \\times 352 \\div 192$`
+   - `√256 × ³√1728 = ? × ⁴√4096` → `$\\sqrt{{256}} \\times \\sqrt[3]{{1728}} = ? \\times \\sqrt[4]{{4096}}$`
+   - `35% of 180 + 18² = (27)^(5/3) + ?²` → `$35\\% \\text{{ of }} 180 + 18^2 = (27)^{{5/3}} + ?^2$`
+12. PRESERVE the exact order, structure, and spacing of content. Output ONLY the {target_language} Version.
+13. Keep question numbers (Q1, Q2, 31., 32., etc.) unchanged. Example: `31. ` before the translated text.
+14. Output ONLY the {target_language} Markdown — no explanations, no wrapping!
+15. **HYBRID MATH / ENGLISH OPERATORS**: If a mathematical equation contains English connecting words like 'of' (e.g., `35% of 180` or `?% of 135`), DO NOT translate the word 'of' into {target_language}. Treat the entire string as a rigid math formula and wrap it in MathJax: `$35\\% \\text{{ of }} 180$`.
+16. **LITERAL DOLLAR SIGNS**: If you see a literal dollar sign `$` representing money or used in a sequence of symbols (like `3 € $ 1 6 8`), you MUST escape it as `\\$` (e.g., `3 € \\$ 1 6 8`) so it isn't confused with a math block.
+
+MARKDOWN CONTENT TO TRANSLATE (MONOLINGUAL MODE):
+---
+{markdown_content}
+---
+
+TRANSLATED CONTENT IN {target_language} ONLY:"""
+
+        return await self._execute_translation_call(prompt, page_number, target_language, len(markdown_content))
+
+
+    async def _execute_translation_call(self, prompt: str, page_number: int, target_language: str, content_length: int) -> str:
         try:
             logger.info(
                 f"Translating page {page_number} to {target_language} "
-                f"({len(markdown_content)} chars)..."
+                f"({content_length} chars)..."
             )
 
             response = await call_gemini_with_timeout(
@@ -230,11 +299,11 @@ TRANSLATED CONTENT IN {target_language}:"""
                 f"Translation complete for page {page_number}: "
                 f"{len(translated)} chars"
             )
+
             return translated
 
         except TranslationError:
             raise
         except Exception as e:
-            raise TranslationError(
-                f"Translation failed for page {page_number}: {e}"
-            )
+            logger.error(f"Translation failed for page {page_number}: {str(e)}")
+            raise TranslationError(f"Failed to translate page {page_number}: {str(e)}")
