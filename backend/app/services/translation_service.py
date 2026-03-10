@@ -90,8 +90,8 @@ class TranslationService:
                     if not prev_stripped.startswith('|') and not prev_stripped.startswith('#') and not re.search(r'[.!?:]\s*$', prev_stripped):
                         
                         is_short_fragment = bool(
-                            len(stripped) <= 15 
-                            and re.match(r'^([a-z]+|\d+(st|nd|rd|th))$', stripped, re.IGNORECASE)
+                            len(stripped) <= 25 
+                            and re.match(r'^([a-z]+|\d+\^?\{?(st|nd|rd|th)\}?|[\d\.\%\+\-\*\/\^\(\)\{\}\\\$]+)$', stripped, re.IGNORECASE)
                         )
                         
                         starts_lowercase = bool(
@@ -100,7 +100,8 @@ class TranslationService:
                             and not re.match(r'^[ivx]+\.', stripped, re.IGNORECASE)
                         )
                         
-                        prev_ends_incomplete = bool(re.search(r'\b(the|and|or|of|in|to|is|are|a|an|if)\s*$', prev_stripped, re.IGNORECASE))
+                        # Added 'of' to the list of words that often precede inline math
+                        prev_ends_incomplete = bool(re.search(r'\b(the|and|or|of|in|to|is|are|a|an|if|for|with|by|from)\s*$', prev_stripped, re.IGNORECASE))
                         
                         if is_short_fragment or starts_lowercase or prev_ends_incomplete:
                             # Merge with the last non-empty line
@@ -160,8 +161,9 @@ TRANSLATION STYLE:
 CRITICAL RULES:
 1. Translate ALL human-readable text to {target_language} — sentences, instructions, directions, question text. Remember to keep the English version and append the {target_language} version right below it.
 2. **MERGE FRAGMENTED SENTENCES (CRITICAL)**: The input OCR text is sometimes fragmented (e.g., "i. If the \\n 1st \\n and \\n 2nd \\n digits..."). You MUST reconstruct and merge these fragments into proper, continuous English sentences BEFORE translating. Output the MERGED, repaired English sentence followed by its translation. Do NOT output fragmented English pieces line-by-line.
-3. **IGNORE HEADERS/LOGOS**: Completely EXCLUDE any institute names (e.g., 'Sreedhar\\'s CCE'), logos, contact details, phone numbers, or branch addresses at the top or bottom of the page. Do NOT translate or include them in your output. Start directly with the test name, directions, or exam content.
-4. PRESERVE all Markdown formatting exactly (headers, bold, italic, lists, links, table syntax).
+3. **INLINE MATH MUST STAY INLINE**: NEVER isolate inline math, positions (e.g., `16^{{th}}`), or numbers on new lines. They MUST be embedded continuously inside the sentence, both in the English version and the {target_language} version. If a sentence has a number in the middle, DO NOT break the sentence.
+4. **IGNORE HEADERS/LOGOS**: Completely EXCLUDE any institute names (e.g., 'Sreedhar\\'s CCE'), logos, contact details, phone numbers, or branch addresses at the top or bottom of the page. Do NOT translate or include them in your output. Start directly with the test name, directions, or exam content.
+5. PRESERVE all Markdown formatting exactly (headers, bold, italic, lists, links, table syntax).
 5. **TABLE TRANSLATION**: Tables are critical — follow these rules strictly:
    - PRESERVE the Markdown table pipe syntax EXACTLY: `| header1 | header2 |`, `|---|---|`, `| data1 | data2 |`.
    - Create BILINGUAL cells inside the table by putting the English text and the {target_language} text in the same cell separated by `<br>`.

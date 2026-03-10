@@ -140,8 +140,12 @@ class DownloadService:
             margin: 0;
             padding: 0;
             background: white;
+            font-family: 'Gautami', 'Noto Sans Telugu', 'Inter', sans-serif;
             font-size: 13px;
             line-height: 1.5;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            word-break: normal;
         }}
         ::-webkit-scrollbar {{ display: none; }}
 
