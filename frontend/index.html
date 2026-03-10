@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GLM-5 PDF Translator</title>
+  <!-- Google Fonts: Noto Sans for all Indian regional scripts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+Telugu:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700&family=Noto+Sans+Tamil:wght@400;500;600;700&family=Noto+Sans+Kannada:wght@400;500;600;700&family=Noto+Sans+Malayalam:wght@400;500;600;700&family=Noto+Sans+Bengali:wght@400;500;600;700&family=Noto+Sans+Gujarati:wght@400;500;600;700&family=Noto+Sans+Gurmukhi:wght@400;500;600;700&family=Noto+Sans+Oriya:wght@400;500;600;700&family=Noto+Nastaliq+Urdu:wght@400;500;600;700&family=Noto+Sans+Marathi:wght@400;500;600;700&display=swap"
+    rel="stylesheet" />
+
+  <style id="dynamic-fonts">
+    /* Gautami font — URL is set dynamically by the script below */
+  </style>
+  <script>
+    // Build Gautami font URL dynamically to match the backend server
+    (function () {
+      var hostname = window.location.hostname;
+      var backendBase = 'http://' + (hostname || 'localhost') + ':8000';
+      var fontUrl = backendBase + '/static/fonts/Gautami.ttf';
+      var styleEl = document.getElementById('dynamic-fonts');
+      styleEl.textContent = `
+        @font-face {
+          font-family: 'Gautami';
+          src: url('${fontUrl}') format('truetype');
+          font-weight: normal;
+          font-style: normal;
+          font-display: swap;
+        }
+      `;
+    })();
+  </script>
+
+  <script>
+    MathJax = {
+      loader: { load: ['[tex]/noerrors'] },
+      tex: {
+        packages: { '[+]': ['noerrors'] },
+        inlineMath: [['$', '$'], ['\\(', '\\)']],
+        displayMath: [['$$', '$$'], ['\\[', '\\]']],
+        processEscapes: true
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+      },
+      startup: {
+        typeset: false
+      }
+    };
+  </script>
+  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-svg.js"></script>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+
+</html>

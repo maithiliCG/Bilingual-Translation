@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { background-color: #f0f0f0; }
+  .test { margin: 20px; border: 1px solid red; background-color: #fff; padding: 10px; }
+</style>
+</head>
+<body>
+
+<div class="test">
+  <h3>Test 1: Normal 1x1 transparent image</h3>
+  <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" alt="image">
+</div>
+
+<div class="test">
+  <h3>Test 2: Normal 1x1 transparent image but with specific styling</h3>
+  <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=" style="max-width:100%; height:auto; display:block; margin:10px auto;" alt="image">
+</div>
+
+<div class="test">
+  <h3>Test 3: Broken image (invalid URL)</h3>
+  <img src="http://thisdoesnotexist1123445.com/broken.jpg" alt="image">
+</div>
+
+</body>
+</html>

@@ -1,0 +1,23 @@
+# Node
+node_modules/
+dist/
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+.env.*
+!.env.example
+*.log
+
+# macOS
+.DS_Store
+
+# Temporary outputs
+backend/uploads/

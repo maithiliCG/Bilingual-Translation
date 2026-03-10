@@ -1,0 +1,327 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@import "tailwindcss";
+
+/* DPI/Zoom normalization – cover dppx, dpi, and -webkit DPR */
+:root {
+  font-size: 100%;
+  --bg-size: auto;
+}
+
+@media (min-resolution: 1.1dppx),
+(min-resolution: 106dpi),
+(-webkit-min-device-pixel-ratio: 1.1) {
+  :root {
+    font-size: 90%;
+  }
+}
+
+@media (min-resolution: 1.25dppx),
+(min-resolution: 120dpi),
+(-webkit-min-device-pixel-ratio: 1.25) {
+  :root {
+    font-size: 85%;
+  }
+}
+
+@media (min-resolution: 1.33dppx),
+(min-resolution: 128dpi),
+(-webkit-min-device-pixel-ratio: 1.33) {
+  :root {
+    font-size: 85%;
+  }
+}
+
+@media (min-resolution: 1.4dppx),
+(min-resolution: 134dpi),
+(-webkit-min-device-pixel-ratio: 1.4) {
+  :root {
+    font-size: 82.5%;
+  }
+}
+
+@media (min-resolution: 1.5dppx),
+(min-resolution: 144dpi),
+(-webkit-min-device-pixel-ratio: 1.5) {
+  :root {
+    font-size: 70%;
+  }
+}
+
+@media (min-resolution: 1.75dppx),
+(min-resolution: 168dpi),
+(-webkit-min-device-pixel-ratio: 1.75) {
+  :root {
+    font-size: 75%;
+  }
+}
+
+@media (min-resolution: 2dppx),
+(min-resolution: 192dpi),
+(-webkit-min-device-pixel-ratio: 2) {
+  :root {
+    font-size: 100%;
+  }
+}
+
+* {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* Let translated content use its own language-specific fonts (set via inline styles) */
+.translated-content,
+.translated-content *,
+.translated-page,
+.translated-page * {
+  font-family: inherit !important;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #0a0a0f;
+  color: #ffffff;
+  overflow-x: hidden;
+}
+
+/* Base Print Styles for PDF Generation */
+.print-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+}
+
+.print-content th,
+.print-content td {
+  border: 1px solid #4b5563;
+  padding: 0.5rem;
+  text-align: left;
+}
+
+.print-content th {
+  background-color: #f3f4f6;
+  font-weight: 600;
+}
+
+.print-content p,
+.print-content span,
+.print-content div {
+  font-family: inherit;
+}
+
+#root {
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Fix browser autofill styling */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 30px #2e2e2e inset !important;
+  -webkit-text-fill-color: #ffffff !important;
+  caret-color: #ffffff !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+input:-webkit-autofill::first-line {
+  -webkit-text-fill-color: #ffffff !important;
+}
+
+/* Sidebar scrollbar styling to prevent layout shift */
+.sidebar-scroll {
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Light scrollbar for white-background panels (translated content viewer) */
+.bg-white .sidebar-scroll,
+.bg-white.sidebar-scroll {
+  scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+}
+
+.bg-white .sidebar-scroll::-webkit-scrollbar-thumb,
+.bg-white.sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.15);
+}
+
+.bg-white .sidebar-scroll::-webkit-scrollbar-thumb:hover,
+.bg-white.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.3);
+}
+
+/* React DatePicker Dark Theme Styles */
+.react-datepicker {
+  background-color: #181818 !important;
+  border: 1px solid #434242 !important;
+  border-radius: 12px !important;
+  font-family: 'Inter', sans-serif !important;
+  color: #d9d9d9 !important;
+}
+
+.react-datepicker__header {
+  background-color: #181818 !important;
+  border-bottom: 1px solid #434242 !important;
+  padding: 10px 0 !important;
+}
+
+.react-datepicker__current-month {
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  font-size: 14px !important;
+  margin-bottom: 8px !important;
+}
+
+.react-datepicker__day-names {
+  display: flex;
+  justify-content: space-around;
+  padding: 0 5px;
+}
+
+.react-datepicker__day-name {
+  color: #d9d9d9 !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  width: 32px !important;
+  line-height: 32px !important;
+  margin: 0 !important;
+}
+
+.react-datepicker__month {
+  margin: 8px 5px !important;
+  padding: 0 !important;
+}
+
+.react-datepicker__week {
+  display: flex;
+  justify-content: space-around;
+  margin: 2px 0 !important;
+}
+
+.react-datepicker__day {
+  color: #d9d9d9 !important;
+  background-color: transparent !important;
+  border-radius: 8px !important;
+  width: 32px !important;
+  height: 32px !important;
+  line-height: 32px !important;
+  margin: 0 !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  transition: all 0.2s ease !important;
+}
+
+.react-datepicker__day:hover {
+  background-color: #3a3a3a !important;
+  border-radius: 8px !important;
+}
+
+.react-datepicker__day--selected,
+.react-datepicker__day--in-selecting-range,
+.react-datepicker__day--in-range {
+  background-color: #4b2c96 !important;
+  border: 1px solid #632ee4 !important;
+  color: #ffffff !important;
+  border-radius: 23px !important;
+}
+
+.react-datepicker__day--range-start,
+.react-datepicker__day--range-end {
+  background-color: #4b2c96 !important;
+  border: 1px solid #632ee4 !important;
+  color: #ffffff !important;
+  border-radius: 23px !important;
+}
+
+.react-datepicker__day--in-selecting-range:not(.react-datepicker__day--in-range) {
+  background-color: rgba(75, 44, 150, 0.3) !important;
+  border: 1px solid rgba(99, 46, 228, 0.5) !important;
+}
+
+.react-datepicker__day--keyboard-selected {
+  background-color: #4b2c96 !important;
+  border: 1px solid #632ee4 !important;
+  color: #ffffff !important;
+}
+
+.react-datepicker__day--disabled {
+  color: #434242 !important;
+  cursor: not-allowed !important;
+}
+
+.react-datepicker__day--outside-month {
+  color: #434242 !important;
+}
+
+.react-datepicker__navigation {
+  top: 10px !important;
+}
+
+.react-datepicker__navigation-icon::before {
+  border-color: #d9d9d9 !important;
+  border-width: 2px 2px 0 0 !important;
+}
+
+.react-datepicker__navigation:hover *::before {
+  border-color: #ffffff !important;
+}
+
+.react-datepicker__triangle {
+  display: none !important;
+}
+
+.react-datepicker__input-container input {
+  background-color: #2e2e2e !important;
+  border: 1px solid #4a4a4a !important;
+  border-radius: 8px !important;
+  padding: 10px 14px !important;
+  color: #ffffff !important;
+  font-size: 14px !important;
+  width: 100% !important;
+  outline: none !important;
+  transition: border-color 0.2s ease !important;
+}
+
+.react-datepicker__input-container input:focus {
+  border-color: #632ee4 !important;
+}
+
+.react-datepicker__input-container input::placeholder {
+  color: #a4a7ae !important;
+}
+
+.react-datepicker__close-icon {
+  right: 8px !important;
+}
+
+.react-datepicker__close-icon::after {
+  background-color: #d9d9d9 !important;
+  font-size: 18px !important;
+}
+
+.react-datepicker__close-icon:hover::after {
+  background-color: #ffffff !important;
+}
