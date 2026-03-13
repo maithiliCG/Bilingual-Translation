@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import json
+import re
 from typing import Optional
 
 from google import genai
@@ -26,6 +27,70 @@ LANGUAGE_STYLE_NOTES = {
     "Marathi": "Use formal written Marathi as used in MPSC/Maharashtra government exam papers. Prefer खालीलपैकी over खाली, नवीन over नव, कार्यान्वित करा over करा.",
     "Gujarati": "Use formal written Gujarati as used in GPSC/Gujarat government exam papers. Prefer નીચે મુજબ over નીચે, નવીન over નવું, સંચાલન કરો over કરો.",
     "Punjabi": "Use formal written Punjabi (ਸਾਹਿਤਕ ਭਾਸ਼ਾ) as used in PPSC/Punjab government exam papers. Prefer ਹੇਠਾਂ ਦਿੱਤੇ over ਹੇਠਾਂ, ਨਵੀਨ over ਨਵਾਂ, ਸੰਚਾਲਨ ਕਰੋ over ਕਰੋ.",
+}
+
+# Unicode ranges for each Indic script — used for post-processing validation
+SCRIPT_UNICODE_RANGES = {
+    "Telugu":     (0x0C00, 0x0C7F),
+    "Tamil":      (0x0B80, 0x0BFF),
+    "Kannada":    (0x0C80, 0x0CFF),
+    "Malayalam":  (0x0D00, 0x0D7F),
+    "Devanagari": (0x0900, 0x097F),   # Hindi, Marathi
+    "Bengali":    (0x0980, 0x09FF),
+    "Gujarati":   (0x0A80, 0x0AFF),
+    "Gurmukhi":   (0x0A00, 0x0A7F),   # Punjabi
+    "Oriya":      (0x0B00, 0x0B7F),   # Odia
+}
+
+# Maps a target language to the script name it uses
+LANGUAGE_TO_SCRIPT = {
+    "Telugu": "Telugu",
+    "Tamil": "Tamil",
+    "Kannada": "Kannada",
+    "Malayalam": "Malayalam",
+    "Hindi": "Devanagari",
+    "Marathi": "Devanagari",
+    "Bengali": "Bengali",
+    "Gujarati": "Gujarati",
+    "Punjabi": "Gurmukhi",
+    "Odia": "Oriya",
+}
+
+# Explicit negative constraints to prevent cross-language script leakage
+LANGUAGE_PURITY_RULES = {
+    "Telugu": (
+        "STRICT LANGUAGE PURITY (CRITICAL): Your ENTIRE output MUST use ONLY Telugu script (తెలుగు లిపి). "
+        "ABSOLUTELY FORBIDDEN scripts — if you write even ONE character from these, the translation is REJECTED: "
+        "Tamil (தமிழ்), Kannada (ಕನ್ನಡ), Malayalam (മലയാളം). "
+        "Common hallucination mistakes you MUST avoid: "
+        "WRONG Tamil words: கூட்டல் (koodal), கழித்தல் (kazhithal), பெருக்கல் (perukkal), வகுத்தல் (vaguthal). "
+        "CORRECT Telugu words: కూడిక (koodika), తీసివేత (teesiveta), గుణకారం (gunakaram), భాగహారం (bhagaharam). "
+        "Every word of your translation must be readable by a Telugu speaker with NO Tamil/Kannada/Malayalam characters."
+    ),
+    "Tamil": (
+        "STRICT LANGUAGE PURITY (CRITICAL): Your ENTIRE output MUST use ONLY Tamil script (தமிழ் எழுத்து). "
+        "ABSOLUTELY FORBIDDEN: Telugu (తెలుగు), Kannada (ಕನ್ನಡ), Malayalam (മലയാളം) characters."
+    ),
+    "Kannada": (
+        "STRICT LANGUAGE PURITY (CRITICAL): Your ENTIRE output MUST use ONLY Kannada script (ಕನ್ನಡ ಲಿಪಿ). "
+        "ABSOLUTELY FORBIDDEN: Telugu (తెలుగు), Tamil (தமிழ்), Malayalam (മലയാളം) characters."
+    ),
+    "Malayalam": (
+        "STRICT LANGUAGE PURITY (CRITICAL): Your ENTIRE output MUST use ONLY Malayalam script (മലയാളം ലിപി). "
+        "ABSOLUTELY FORBIDDEN: Telugu (తెలుగు), Tamil (தமிழ்), Kannada (ಕನ್ನಡ) characters."
+    ),
+    "Hindi": (
+        "STRICT LANGUAGE PURITY (CRITICAL): Your ENTIRE output MUST use ONLY Devanagari script (देवनागरी लिपि). "
+        "ABSOLUTELY FORBIDDEN: Telugu, Tamil, Kannada, Malayalam, Bengali, Gujarati characters."
+    ),
+    "Bengali": (
+        "STRICT LANGUAGE PURITY (CRITICAL): Your ENTIRE output MUST use ONLY Bengali script (বাংলা লিপি). "
+        "ABSOLUTELY FORBIDDEN: Devanagari (हिन्दी), Oriya, Telugu, Tamil characters."
+    ),
+    "Odia": (
+        "STRICT LANGUAGE PURITY (CRITICAL): Your ENTIRE output MUST use ONLY Odia script (ଓଡ଼ିଆ ଲିପି). "
+        "ABSOLUTELY FORBIDDEN: Bengali (বাংলা), Devanagari (हिन्दी), Telugu, Tamil characters."
+    ),
 }
 
 
@@ -146,6 +211,7 @@ class TranslationService:
             target_language,
             f"Use formal written {target_language} as used in government competitive exam papers. Prefer Sanskrit-origin/tatsama vocabulary over colloquial forms."
         )
+        language_purity_note = LANGUAGE_PURITY_RULES.get(target_language, "")
 
         prompt = f"""You are an expert translator specializing in translating English educational/exam documents to {target_language}.
 
@@ -157,6 +223,7 @@ TRANSLATION STYLE:
 - Generate {target_language} in FORMAL COMPETITIVE EXAMINATION style used in SSC/Banking/State PSC exams.
 - Use standard written {target_language}. Avoid conversational or spoken tone.
 - {language_style_note}
+- {language_purity_note}
 - Avoid literal word-by-word translation. Use structured exam phrasing that sounds natural in {target_language}.
 - Technical terms commonly used in exams (like "compound interest", "ratio", "percentage") should use the standard {target_language} equivalents used in government exam papers.
 
@@ -214,6 +281,7 @@ TRANSLATED CONTENT IN BILINGUAL FORMAT:"""
             target_language,
             f"Use formal written {target_language} as used in government competitive exam papers. Prefer Sanskrit-origin/tatsama vocabulary over colloquial forms."
         )
+        language_purity_note = LANGUAGE_PURITY_RULES.get(target_language, "")
 
         prompt = f"""You are an expert translator specializing in translating English educational/exam documents to {target_language}.
 
@@ -224,6 +292,7 @@ TRANSLATION STYLE:
 - Generate {target_language} in FORMAL COMPETITIVE EXAMINATION style used in SSC/Banking/State PSC exams.
 - Use standard written {target_language}. Avoid conversational or spoken tone.
 - {language_style_note}
+- {language_purity_note}
 - Avoid literal word-by-word translation. Use structured exam phrasing that sounds natural in {target_language}.
 - Technical terms commonly used in exams (like "compound interest", "ratio", "percentage") should use the standard {target_language} equivalents used in government exam papers.
 
@@ -262,48 +331,123 @@ TRANSLATED CONTENT IN {target_language} ONLY:"""
         return await self._execute_translation_call(prompt, page_number, target_language, len(markdown_content))
 
 
+    def _clean_hallucinated_scripts(self, text: str, target_language: str) -> tuple[str, list[str]]:
+        """
+        Detect and remove characters from unauthorized Indic scripts.
+        
+        Returns:
+            (cleaned_text, list_of_violations) — violations is a list of
+            (script_name, offending_chars) strings for logging.
+        """
+        target_script = LANGUAGE_TO_SCRIPT.get(target_language)
+        if not target_script:
+            return text, []
+
+        violations = []
+
+        for script_name, (range_start, range_end) in SCRIPT_UNICODE_RANGES.items():
+            # Skip the target language's own script
+            if script_name == target_script:
+                continue
+
+            # Build regex for this script's Unicode range using chr()
+            range_pattern = f'[{chr(range_start)}-{chr(range_end)}]+'
+            pattern = re.compile(range_pattern)
+            found = pattern.findall(text)
+
+            if found:
+                violations.append(f"{script_name}: {'|'.join(found[:5])}")
+                # Remove the offending characters
+                text = pattern.sub('', text)
+
+        # Clean up: remove leftover double spaces from stripped characters
+        text = re.sub(r'  +', ' ', text)
+
+        return text, violations
+
     async def _execute_translation_call(self, prompt: str, page_number: int, target_language: str, content_length: int) -> str:
-        try:
-            logger.info(
-                f"Translating page {page_number} to {target_language} "
-                f"({content_length} chars)..."
-            )
+        max_attempts = 2
+        last_violations = []
 
-            response = await call_gemini_with_timeout(
-                self.client,
-                self.model,
-                prompt,
-                types.GenerateContentConfig(
-                    temperature=0.1,
-                    max_output_tokens=settings.GEMINI_MAX_OUTPUT_TOKENS,
-                ),
-                timeout=240
-            )
-
-            translated = response.text
-            if not translated:
-                raise TranslationError(
-                    f"Empty translation response for page {page_number}"
+        for attempt in range(1, max_attempts + 1):
+            try:
+                logger.info(
+                    f"Translating page {page_number} to {target_language} "
+                    f"({content_length} chars) — attempt {attempt}/{max_attempts}..."
                 )
 
-            # Clean up: remove any wrapping ```markdown blocks the model might add
-            translated = translated.strip()
-            if translated.startswith("```markdown"):
-                translated = translated[len("```markdown"):].strip()
-            if translated.startswith("```"):
-                translated = translated[3:].strip()
-            if translated.endswith("```"):
-                translated = translated[:-3].strip()
+                # Use lower temperature on retry for more deterministic output
+                temperature = 0.1 if attempt == 1 else 0.05
 
-            logger.info(
-                f"Translation complete for page {page_number}: "
-                f"{len(translated)} chars"
-            )
+                response = await call_gemini_with_timeout(
+                    self.client,
+                    self.model,
+                    prompt,
+                    types.GenerateContentConfig(
+                        temperature=temperature,
+                        max_output_tokens=settings.GEMINI_MAX_OUTPUT_TOKENS,
+                    ),
+                    timeout=240
+                )
 
-            return translated
+                translated = response.text
+                if not translated:
+                    raise TranslationError(
+                        f"Empty translation response for page {page_number}"
+                    )
 
-        except TranslationError:
-            raise
-        except Exception as e:
-            logger.error(f"Translation failed for page {page_number}: {str(e)}")
-            raise TranslationError(f"Failed to translate page {page_number}: {str(e)}")
+                # Clean up: remove any wrapping ```markdown blocks the model might add
+                translated = translated.strip()
+                if translated.startswith("```markdown"):
+                    translated = translated[len("```markdown"):].strip()
+                if translated.startswith("```"):
+                    translated = translated[3:].strip()
+                if translated.endswith("```"):
+                    translated = translated[:-3].strip()
+
+                # Post-processing: detect and strip unauthorized scripts
+                cleaned, violations = self._clean_hallucinated_scripts(translated, target_language)
+
+                if violations:
+                    logger.warning(
+                        f"Page {page_number}, attempt {attempt}: "
+                        f"LANGUAGE CONTAMINATION DETECTED — {'; '.join(violations)}"
+                    )
+                    last_violations = violations
+
+                    if attempt < max_attempts:
+                        # Retry with the cleaned text hint
+                        logger.info(
+                            f"Page {page_number}: Retrying translation with stricter parameters..."
+                        )
+                        continue
+                    else:
+                        # Final attempt — use the cleaned version
+                        logger.warning(
+                            f"Page {page_number}: Using cleaned translation after {max_attempts} attempts. "
+                            f"Stripped contamination: {'; '.join(last_violations)}"
+                        )
+                        translated = cleaned
+                else:
+                    if attempt > 1:
+                        logger.info(
+                            f"Page {page_number}: Retry attempt {attempt} produced clean translation!"
+                        )
+
+                logger.info(
+                    f"Translation complete for page {page_number}: "
+                    f"{len(translated)} chars"
+                )
+
+                return translated
+
+            except TranslationError:
+                raise
+            except Exception as e:
+                logger.error(f"Translation failed for page {page_number}: {str(e)}")
+                if attempt == max_attempts:
+                    raise TranslationError(f"Failed to translate page {page_number}: {str(e)}")
+                logger.info(f"Page {page_number}: Retrying after error...")
+
+        # Should never reach here, but just in case
+        raise TranslationError(f"Translation failed for page {page_number} after {max_attempts} attempts")
