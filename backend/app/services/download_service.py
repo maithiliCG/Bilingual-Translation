@@ -6,17 +6,15 @@ PDF Generation:
   This handles MathJax, CSS Grid, Google Fonts, and base64 images correctly.
 
 DOCX Generation:
-  First generates a high-fidelity PDF via Playwright, then converts PDF → DOCX
-  using pdf2docx. This preserves visual layout, math, and images.
+  Direct HTML → DOCX using python-docx + BeautifulSoup.
+  Parses the reconstructed HTML semantically to preserve text order,
+  bilingual structure, images, and tables.
 """
 
 import asyncio
 import logging
 import io
-import os
 import re
-import tempfile
-from pathlib import Path
 from typing import Optional
 
 from app.config import settings
@@ -279,7 +277,7 @@ class DownloadService:
             raise RuntimeError(f"PDF generation failed: {e}")
 
     # ─────────────────────────────────────────────────────────────
-    #  DOCX Generation (Playwright PDF → pdf2docx)
+    #  DOCX Generation (Direct HTML → python-docx)
     # ─────────────────────────────────────────────────────────────
 
     async def generate_docx(
@@ -289,53 +287,35 @@ class DownloadService:
         lang_code: str = "",
     ) -> io.BytesIO:
         """
-        Generate a DOCX file by:
-        1. Rendering HTML → PDF via Playwright (MathJax, fonts, layout all perfect)
-        2. Converting PDF → DOCX via pdf2docx (preserves visual fidelity)
+        Generate a DOCX file by directly parsing HTML and building
+        the document with python-docx + BeautifulSoup.
 
-        This approach ensures PDF and DOCX look identical, and math equations
-        render correctly (MathJax → SVG → image in DOCX).
+        This preserves text semantics, bilingual structure, spacing,
+        and images correctly — unlike pdf2docx which reverse-engineers
+        PDF layout and often merges/reorders sentences.
 
         Args:
             pages: dict of page_number -> page_data with reconstructed_html
             file_name: Base name for the document title
-            lang_code: Target language code (for logging)
+            lang_code: Target language code (for font selection)
 
         Returns:
             BytesIO buffer containing the .docx file
         """
-        from pdf2docx import Converter
-
-        pdf_path = None
-        docx_path = None
+        from app.services.html_to_docx_service import HtmlToDocxConverter
 
         try:
-            # Step 1: Generate high-fidelity PDF via Playwright
-            logger.info("DOCX generation step 1/2: Rendering PDF via Playwright...")
-            pdf_bytes = await self.generate_pdf(pages, file_name)
+            logger.info(
+                f"DOCX generation: Converting HTML → DOCX directly "
+                f"(lang={lang_code}, pages={len(pages)})"
+            )
 
-            # Step 2: Write PDF to temp file (pdf2docx needs file paths)
-            with tempfile.NamedTemporaryFile(
-                suffix='.pdf', delete=False, prefix='glm5_'
-            ) as pdf_tmp:
-                pdf_tmp.write(pdf_bytes)
-                pdf_path = pdf_tmp.name
-
-            docx_path = pdf_path.replace('.pdf', '.docx')
-
-            # Step 3: Convert PDF → DOCX (blocking, run in thread)
-            logger.info("DOCX generation step 2/2: Converting PDF → DOCX...")
-            await asyncio.to_thread(self._convert_pdf_to_docx, pdf_path, docx_path)
-
-            # Step 4: Read DOCX into memory buffer
-            with open(docx_path, 'rb') as f:
-                docx_bytes = f.read()
-
-            buffer = io.BytesIO(docx_bytes)
-            buffer.seek(0)
+            # Run the conversion in a thread to avoid blocking the event loop
+            converter = HtmlToDocxConverter(lang_code=lang_code)
+            buffer = await asyncio.to_thread(converter.convert, pages)
 
             logger.info(
-                f"DOCX generated successfully: {len(docx_bytes):,} bytes "
+                f"DOCX generated successfully: {buffer.getbuffer().nbytes:,} bytes "
                 f"(lang={lang_code})"
             )
             return buffer
@@ -343,26 +323,6 @@ class DownloadService:
         except Exception as e:
             logger.error(f"DOCX generation failed: {e}", exc_info=True)
             raise RuntimeError(f"DOCX generation failed: {e}")
-
-        finally:
-            # Always clean up temp files
-            for path in [pdf_path, docx_path]:
-                if path and os.path.exists(path):
-                    try:
-                        os.unlink(path)
-                    except OSError:
-                        pass
-
-    def _convert_pdf_to_docx(self, pdf_path: str, docx_path: str):
-        """
-        Convert a PDF file to DOCX using pdf2docx.
-        This is a synchronous method run via asyncio.to_thread().
-        """
-        from pdf2docx import Converter
-        cv = Converter(pdf_path)
-        cv.convert(docx_path)
-        cv.close()
-        logger.info(f"pdf2docx conversion complete: {pdf_path} → {docx_path}")
 
     # ─────────────────────────────────────────────────────────────
     #  Legacy / Utility Methods

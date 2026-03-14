@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     GLM_OCR_MAX_PAGES_PER_REQUEST: int = 50  # Split large PDFs into chunks
     GLM_OCR_MAX_FILE_SIZE_MB: int = 50
     GLM_OCR_TIMEOUT: int = 300  # seconds
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MODEL: str = "gemini-3-flash-preview"
     MAX_UPLOAD_SIZE_MB: int = 500  # Allow very large PDFs
 
     # Rendering & OCR Tuning
