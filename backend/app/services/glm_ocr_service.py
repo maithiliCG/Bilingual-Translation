@@ -22,6 +22,7 @@ from PIL import Image
 
 from app.config import settings
 from app.core.exceptions import GLMOCRError
+from app.utils.gemini_utils import remove_table_image_duplicates
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ class GLMOCRService:
             markdown_content = self._clean_markdown(markdown_content)
 
             # Post-process: Remove image tags that appear immediately before markdown tables
-            markdown_content = self._remove_table_image_duplicates(markdown_content)
+            markdown_content = remove_table_image_duplicates(markdown_content)
 
             logger.info(
                 f"GLM-OCR API response in {elapsed:.1f}s — "
@@ -190,26 +191,8 @@ class GLMOCRService:
         return markdown_content
 
     def _remove_table_image_duplicates(self, markdown_content: str) -> str:
-        """
-        Remove image tags that appear immediately before markdown tables.
-        The OCR sometimes creates both an image tag AND a text table
-        for the same table content. We keep the text table and remove the image.
-        """
-        table_pattern = re.compile(
-            r'(!\[image\]\(crop:[^)]+\))\s*\n+((?:\|[^\n]+\|\s*\n)+)',
-            re.MULTILINE
-        )
-
-        def remove_table_images(match):
-            table_content = match.group(2)
-            # Check if this is actually a table (has header separator like |---|---|)
-            if re.search(r'\|\s*[-:]+\s*\|', table_content):
-                logger.info("Removed duplicate image tag before markdown table")
-                return table_content  # Keep only the table, remove image
-            else:
-                return match.group(0)  # Keep both if not a proper table
-
-        return table_pattern.sub(remove_table_images, markdown_content)
+        """Delegates to shared utility. Kept for backward compatibility."""
+        return remove_table_image_duplicates(markdown_content)
 
     async def parse_pdf_bytes(
         self,

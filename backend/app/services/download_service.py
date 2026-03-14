@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.config import settings
+from app.utils.gemini_utils import strip_unwanted_lines
 
 logger = logging.getLogger(__name__)
 
@@ -376,12 +377,5 @@ class DownloadService:
         return self._build_print_html(pages, file_name)
 
     def _strip_unwanted_lines(self, html: str) -> str:
-        """Remove unwanted borders, lines, and hr tags for cleaner output."""
-        # Remove border-bottom from inline styles
-        html = re.sub(r'border-bottom\s*:[^;"]*;?', '', html)
-
-        # Remove <hr> tags entirely (self-closing and regular)
-        html = re.sub(r'<hr\s*/?\s*>', '', html, flags=re.IGNORECASE)
-        html = re.sub(r'<hr\s+[^>]*/?\s*>', '', html, flags=re.IGNORECASE)
-
-        return html
+        """Delegates to shared utility. Kept for backward compatibility."""
+        return strip_unwanted_lines(html)

@@ -100,8 +100,8 @@ class LayoutDetectionService:
     headers, etc.) is handled by GLM-OCR.
     """
 
-    # We ONLY want figure detections
-    FIGURE_CLASSES = {"figure"}
+    # We want figure detections and isolated formulas (often complex geometry/diagrams)
+    FIGURE_CLASSES = {"figure", "isolate_formula"}
 
     async def detect_figures(
         self,

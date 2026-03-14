@@ -16,25 +16,9 @@ from app.config import settings
 from app.core.exceptions import ReconstructionError
 from app.models.enums import get_language_name
 from app.utils.file_utils import bytes_to_base64
+from app.utils.gemini_utils import call_gemini_with_timeout, strip_unwanted_lines
 
 logger = logging.getLogger(__name__)
-
-
-async def call_gemini_with_timeout(client, model, contents, config, timeout=180):
-    """Call Gemini API with timeout protection"""
-    try:
-        result = await asyncio.wait_for(
-            asyncio.to_thread(
-                client.models.generate_content,
-                model=model,
-                contents=contents,
-                config=config,
-            ),
-            timeout=timeout
-        )
-        return result
-    except asyncio.TimeoutError:
-        raise ReconstructionError(f"Gemini API call timed out after {timeout} seconds")
 
 
 class ReconstructionService:
@@ -77,7 +61,6 @@ class ReconstructionService:
             return f'<div class="image-page" style="text-align:center;padding:8px;"><img src="data:image/png;base64,{b64_img}" style="max-width:100%;height:auto;" alt="Page {page_number}"></div>'
 
         target_language = get_language_name(target_language_code)
-        layout_summary = self._format_layout_summary(layout_details)
 
         if translation_mode == "monolingual":
             prompt = f"""You are an expert document layout specialist. Your output HTML will be rendered inside an A4-width container (max-width: 680px, padding: 12px 20px). Design your HTML accordingly.
@@ -150,9 +133,11 @@ CRITICAL — LAYOUT & CONTENT ORDERING:
 1. Look at the attached ORIGINAL PAGE IMAGE carefully.
 2. Output content in EXACTLY the same top-to-bottom reading order as the original image.
 3. DO NOT reorder, skip, or move any content. If the original shows Question 31 before Question 32, your HTML must show them in that exact order.
-4. If the original has a header/title bar at the top, output it FIRST.
-5. TWO-COLUMN LAYOUTS: If the original image is divided into two distinct vertical columns, do NOT just flatten everything into a single long column. Instead, wrap the entire multi-column section in a `<div style="column-count: 2; column-gap: 40px; text-align: justify;">` to replicate the visual two-column flow.
-6. Position each element (text, image, table) in the same relative position as the original. Each bilingual pair (English + {target_language}) acts as a single logical block representing the original English block in the image.
+4. TWO-COLUMN LAYOUTS: If the original image is divided into two distinct vertical columns, wrap the entire multi-column section in a `<div style="column-count: 2; column-gap: 40px; text-align: justify;">` to replicate the visual two-column flow.
+5. **BILINGUAL TEXT STACKING**: The input text provides each block of text sequentially. For EVERY question/block, you will receive: the English question text, then the English options, then the {target_language} text, then the {target_language} options.
+   - You MUST preserve this interleaving exactly.
+   - For every question/block, render the complete English section (TEXT AND OPTIONS) first.
+   - Immediately below it, render the complete matching {target_language} section (TEXT AND OPTIONS).
 
 DO NOT TRANSLATE or REMOVE: The content is already bilingual (English + {target_language}). Keep BOTH languages exactly as they are.
 
@@ -162,7 +147,8 @@ HANDLING IMAGES AND TABLES (CRITICAL MULTIMODAL RULE):
 - Rule 1 (CHARTS/GRAPHS): If the crop area contains a chart, graph, diagram, geometry figure, or picture, you MUST convert the tag to an HTML img tag:
   `<img src="crop:[ymin, xmin, ymax, xmax]" style="max-width:80%; height:auto; display:block; margin:10px auto;">`
   Use max-width:80% for large charts, max-width:50% for smaller diagrams, max-width:30% for icons/logos — match the proportion visible in the original.
-- Rule 2 (TABLES): If the crop area contains a DATA TABLE with text/numbers, DO NOT render it as an `<img>`. Instead, READ the table structure (rows, columns, cell layout) from the original image at those coordinates, and output it as a properly styled HTML `<table>` using the already-translated bilingual content from the extracted markdown above. Do NOT re-translate or discard English — the text is already prepared.
+- Rule 2 (TABLES): If the crop area contains a DATA TABLE with text/numbers, DO NOT render it as an `<img>`. Instead, READ the table structure (rows, columns, cell layout) from the original image at those coordinates, and output it as a properly styled HTML `<table>` using the text from the extracted markdown below. 
+   - Because the text is interleaved, you should output an English table followed by the translated {target_language} table, or combine them into a bilingual table depending on standard exam layout.
 - Rule 3: For images, use the EXACT SAME crop coordinates — do NOT change the numbers in the src.
 - Rule 4: NEVER drop, skip, or omit a crop tag. It must either become an `<img>` (if it's a visual graph/figure) or a `<table>` (if it's a text table). PRESERVE ALL CROP TAGS.
 - Rule 5: Place images/tables in the EXACT same position relative to surrounding text as shown in the original image.
@@ -175,17 +161,18 @@ MATH AND FORMULAS (CRITICAL):
 - INLINE MATH: If a math expression or percentage (like `$14\\frac{2}{7}\\%$` or `12.5%`) appears inside a sentence, keep it INLINE. Do NOT wrap it in a new `<div>`, `<p>`, or place it on a new line. It must flow naturally in the paragraph.
 
 LAYOUT RULES:
-1. Each QUESTION block must be wrapped in its own `<div>` with `margin-bottom: 12px; padding: 8px 0;`. Use ONLY margin and padding for spacing. ABSOLUTELY NO border-bottom, NO <hr>, NO horizontal lines, NO separators. 
-2. Question number must be **bold**: `<b>31.</b>`. The question text (both English and {target_language} translation) should immediately follow within the same div. You can put a `<br>` between the English and Translated text if they belong together.
-3. **MCQ OPTIONS (VISUAL MATCHING & RESPONSIVE LAYOUT)**: Observe how options are arranged in the original image and match that grouping, BUT prioritize space efficiency.
-   - If options are short (1-4 words each), ALWAYS put them in a single row using: `<div style="display: flex; flex-wrap: wrap; gap: 20px; margin-top: 6px;">`
-   - If options are medium length, use a 2x2 grid: `<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 6px;">`
-   - ONLY use vertical stacking (`<div style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">`) if the options are very long sentences that span the entire page width.
-   - NEVER blindly force options into a vertical stack just because they are bilingual. Use `flex-wrap` or `grid` to allow them to flow horizontally if space permits.
-   - For EACH option, treat the English text and the {target_language} translation as a single unified block. Use `<br>` or `<div style="margin-top:2px;">` INSIDE the individual option div to stack the {target_language} text immediately beneath the English text. DO NOT DISCARD THE TRANSLATION.
-   - Example markup for a single bilingual option: `<div><b>A)</b> English text<br><span style="color:#444;">{target_language} text</span></div>`
-5. If the original has a shaded/colored header bar, replicate with `background-color` and `padding`.
-6. **TABLES (GRID LINES)**: Use `<table style="border-collapse:collapse; width:100%; margin:8px 0;">`. Look at the image: ONLY add a 1px solid border to `<td>` and `<th>` elements if visible grid lines exist in the original image. If the image shows implicitly aligned columns of text without drawn lines, use `<td style="border:none; padding:6px 10px;">` to preserve the visual cleanliness.
+1. Wrap each grouped question block (the English text + options AND the {target_language} text + options) in a single outer `<div style="margin-bottom: 20px; padding: 8px 0; border-bottom: 1px solid #eee;">`.
+2. Question number must be **bold**: `<b>31.</b>`.
+3. **BILINGUAL TEXT DISPLAY**:
+   - Render the complete English text block.
+   - IMMEDIATELY BELOW the English text, render the English options in ONE SINGLE ROW using: `<div style="display: flex; flex-direction: row; justify-content: space-between; gap: 15px; margin-top: 10px; flex-wrap: wrap;">`.
+   - Add a small margin `<div style="margin-top: 15px;">`.
+   - Render the complete {target_language} text block. You may use a slightly different color like `color: #333;` for the translated text.
+   - IMMEDIATELY BELOW the {target_language} text, render the {target_language} options in ONE SINGLE ROW using the same flex row style.
+   - ONLY use vertical stacking for options if the options are very long sentences that span the entire page width.
+   - Do NOT mix English and {target_language} anywhere. Keep the English text+options entirely above the {target_language} text+options.
+4. **BOLD THE CORRECT ANSWER**: If the original image shows a clearly marked correct answer (e.g., a tick mark, bold text, or highlighted option), you MUST make that option **bold** in your HTML output: `<b>1) East</b>`.
+6. **TABLES (GRID LINES)**: Use `<table style="border-collapse:collapse; width:100%; margin:15px 0;">`. Look at the image: ONLY add a 1px solid border (`border: 1px solid #ccc; padding: 8px;`) to `<td>` and `<th>` elements if visible grid lines exist in the original image.
 7. Use inline CSS only. Font-size: 13px for body text, 15px for headings. Line-height: 1.5.
 8. FORBIDDEN: No `<hr>`, no `border-bottom` on divs, no horizontal separators of any kind. Do NOT insert arbitrary `<br>` or new `<p>` blocks into the middle of a sentence. Let text wrap naturally. Keep words like '1st', '2nd', '3rd', '4th', etc., strictly INLINE within their sentences. Do not break a single sentence into multiple separate blocks.
 9. SPACING: Keep spacing compact — match the density of the original page. Don't add excessive whitespace.
@@ -290,8 +277,8 @@ HTML ({target_language}):"""
                 # Enhanced regex: handles multiple coordinate formats
                 # Matches: crop:[y,x,y,x], crop: [y,x,y,x], crop:y,x,y,x, [y,x,y,x]
                 pattern = re.compile(
-                    r'(?:crop:\s*(?:\[)?|(?<=src=["\'])\[)\s*'
-                    r'(\d+)\s*[,\s]\s*(\d+)\s*[,\s]\s*(\d+)\s*[,\s]\s*(\d+)\s*'
+                    r'(?:crop:\s*(?:\[)?|(?<=src=")\[|(?<=src=\')\[)\s*'
+                    r'(\d+(?:\.\d+)?)\s*[,\s]\s*(\d+(?:\.\d+)?)\s*[,\s]\s*(\d+(?:\.\d+)?)\s*[,\s]\s*(\d+(?:\.\d+)?)\s*'
                     r'(?:\])?',
                     re.IGNORECASE
                 )
@@ -317,7 +304,7 @@ HTML ({target_language}):"""
 
                 def replacer(match):
                     try:
-                        ymin, xmin, ymax, xmax = map(int, match.groups())
+                        ymin, xmin, ymax, xmax = [int(float(v)) for v in match.groups()]
                         glm_coords = [ymin, xmin, ymax, xmax]
                         
                         # Try to match with a YOLO detection for precise coordinates
@@ -527,9 +514,9 @@ HTML ({target_language}):"""
                             part
                         )
                         # Simple fractions: "2/5" → "$\frac{2}{5}$"
-                        # Guards: not after ')', not dates (03/2026)
+                        # Guards: not after ')', not dates (03/2026), not year-like denominator
                         part = re.sub(
-                            r'(?<!\))(?<!\d)(?<!/)(\d{1,2})/(\d{1,2})(?!\d|/)',
+                            r'(?<!\))(?<!\d)(?<!/)(\d{1,2})/(\d{1,2})(?!\d|/)(?!\d{2})',
                             r'$\\frac{\1}{\2}$',
                             part
                         )
@@ -542,20 +529,31 @@ HTML ({target_language}):"""
         """Replace bad src attributes (hallucinations or failed crops) with a transparent 1x1 pixel to avoid broken icons."""
         import re
         empty_pixel = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+        blanked_count = 0
+
+        def _replace_and_log(match):
+            nonlocal blanked_count
+            src_value = match.group(2)
+            blanked_count += 1
+            logger.warning(f"Blanking non-base64 image src: {src_value[:80]}...")
+            return match.group(1) + empty_pixel + match.group(3)
+
         # Fix double quotes src
         html = re.sub(
             r'(<img\s+[^>]*src=")(?!data:image)([^"]+)("[^>]*>)',
-            rf'\g<1>{empty_pixel}\g<3>',
+            _replace_and_log,
             html,
             flags=re.IGNORECASE
         )
         # Fix single quotes src
         html = re.sub(
             r"(<img\s+[^>]*src=')(?!data:image)([^']+)('[^>]*>)",
-            rf"\g<1>{empty_pixel}\g<3>",
+            _replace_and_log,
             html,
             flags=re.IGNORECASE
         )
+        if blanked_count > 0:
+            logger.warning(f"Total images blanked by _hide_broken_images: {blanked_count}")
         return html
 
     def _fix_superscripts_and_units(self, html: str) -> str:
@@ -668,30 +666,8 @@ HTML ({target_language}):"""
         return text
 
     def _strip_unwanted_lines(self, html: str) -> str:
-        """
-        Remove unwanted borders, lines, and hr tags from reconstructed HTML.
-        
-        Gemini sometimes adds border-bottom or <hr> between questions despite
-        explicit instructions not to. This post-processing step strips them.
-        """
-        # Remove border-bottom from inline styles on divs
-        html = re.sub(r'border-bottom\s*:\s*[^;"]*;?', '', html)
-        
-        # Remove <hr> tags entirely (self-closing and regular)
-        html = re.sub(r'<hr\s*/?\s*>', '', html, flags=re.IGNORECASE)
-        html = re.sub(r'<hr\s+[^>]*/?\s*>', '', html, flags=re.IGNORECASE)
-        
-        # Remove border-top from inline styles (another line variant)
-        # But only outside of table contexts — we want table borders
-        # Only strip if it looks like a question separator (1px solid #eee, #ddd, #ccc, etc.)
-        html = re.sub(
-            r'border-top\s*:\s*1px\s+solid\s+#[cde][cde][cde]\s*;?',
-            '',
-            html,
-            flags=re.IGNORECASE
-        )
-        
-        return html
+        """Delegates to shared utility. Kept for backward compatibility."""
+        return strip_unwanted_lines(html)
 
     def _format_layout_summary(self, layout_details: list) -> str:
         """Format layout details into a readable summary for the prompt."""

@@ -1,9 +1,11 @@
-"""PDF processing service — splitting PDFs and rendering page images."""
+"""PDF processing service — splitting PDFs, rendering page images, and extracting native images."""
 
 import io
 import logging
+import os
+import uuid
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import fitz  # PyMuPDF
 

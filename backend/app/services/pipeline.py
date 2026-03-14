@@ -116,6 +116,8 @@ class Pipeline:
             logger.info("Pipeline using REMOTE GLM-OCR API")
         self.translation_service = TranslationService()
         self.reconstruction_service = ReconstructionService()
+        # Concurrency limiter for Gemini API calls (translation + reconstruction)
+        self._gemini_semaphore = asyncio.Semaphore(3)
 
     async def process_pdf(
         self,
@@ -209,6 +211,8 @@ class Pipeline:
                         for ct in crop_tags:
                             logger.info(f"  Crop tag: {ct}")
 
+                   
+
                     # --- DocLayout-YOLO: Detect figures for precise cropping ---
                     figure_detections = []
                     try:
@@ -220,20 +224,49 @@ class Pipeline:
                                 f"Page {page_num}: YOLO detected {len(figure_detections)} figure(s) "
                                 f"for precise cropping"
                             )
-                            # Inject YOLO figures into markdown if they are not already represented
-                            existing_crops = re.findall(r'crop:', original_markdown, flags=re.IGNORECASE)
-                            if len(existing_crops) < len(figure_detections):
-                                logger.info(f"Page {page_num}: Injecting YOLO figure tags at top of markdown")
-                                injected_tags = []
-                                for fig in figure_detections:
-                                    bbox = fig.get("bbox_normalized")
-                                    if bbox:
-                                        ymin, xmin, ymax, xmax = bbox
-                                        img_tag = f"![image](crop:[{ymin}, {xmin}, {ymax}, {xmax}])"
-                                        if f"crop:[{ymin}" not in original_markdown:
-                                            injected_tags.append(img_tag)
-                                if injected_tags:
-                                    original_markdown = "**[SUPPLEMENTARY FIGURES FOR PAGE LAYOUT]**\n" + "\n".join(injected_tags) + "\n\n---\n" + original_markdown
+                            # Inject YOLO figures that are NOT already represented by GLM-OCR crop tags
+                            # Uses IoU-based matching to avoid duplicates
+                            from app.services.layout_detection_service import compute_iou
+                            existing_crop_coords = re.findall(
+                                r'crop:\s*\[?\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)',
+                                original_markdown, flags=re.IGNORECASE
+                            )
+                            existing_boxes = [[int(y1), int(x1), int(y2), int(x2)] for y1, x1, y2, x2 in existing_crop_coords]
+                            
+                            injected_images = []
+                            for fig in figure_detections:
+                                bbox = fig.get("bbox_normalized")
+                                if not bbox:
+                                    continue
+                                ymin, xmin, ymax, xmax = bbox
+                                # Check if any existing GLM-OCR crop overlaps significantly with this YOLO detection
+                                is_duplicate = any(
+                                    compute_iou([ymin, xmin, ymax, xmax], existing_box) > 0.3
+                                    for existing_box in existing_boxes
+                                )
+                                if not is_duplicate:
+                                    img_tag = f"![image](crop:[{ymin}, {xmin}, {ymax}, {xmax}])"
+                                    # Store tuple of (ymin, img_tag) so we can sort by vertical position
+                                    injected_images.append((ymin, img_tag))
+                                    logger.info(f"Page {page_num}: Injecting YOLO figure [{ymin},{xmin},{ymax},{xmax}] (no GLM-OCR overlap)")
+                                else:
+                                    logger.info(f"Page {page_num}: Skipping YOLO figure [{ymin},{xmin},{ymax},{xmax}] (overlaps existing GLM-OCR crop)")
+                            
+                            if injected_images:
+                                # Sort by vertical position descending (bottom to top)
+                                # so that inserting into a list doesn't shift the indices for subsequent insertions.
+                                injected_images.sort(key=lambda x: x[0], reverse=True)
+                                
+                                lines = original_markdown.split('\\n')
+                                for ymin, img_tag in injected_images:
+                                    # Calculate proportional line index based on normalized Y coordinate (0-1000)
+                                    target_line_idx = int((ymin / 1000.0) * len(lines))
+                                    # Ensure we don't go out of bounds
+                                    target_line_idx = max(0, min(target_line_idx, len(lines)))
+                                    # Insert the tag
+                                    lines.insert(target_line_idx, f"\\n{img_tag}\\n")
+                                    
+                                original_markdown = "\\n".join(lines)
                     except Exception as yolo_err:
                         logger.warning(f"Page {page_num}: YOLO detection failed ({yolo_err}), using GLM-OCR coordinates")
 
@@ -243,6 +276,26 @@ class Pipeline:
                         if layout_details and isinstance(layout_details[0], list)
                         else layout_details
                     )
+
+                    # --- TOKEN REPLACER ARCHITECTURE ---
+                    # Hide complex crop coordinates from the LLMs to prevent truncation/corruption
+                    image_token_map = {}
+                    
+                    def tokenize_image_tag(match):
+                        original_tag = match.group(0)
+                        token = f"<IMG_{str(uuid.uuid4())[:8].upper()}>"
+                        image_token_map[token] = original_tag
+                        return token
+                        
+                    tokenized_markdown = re.sub(
+                        r'!\[.*?\]\s*\(crop:\[?\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\]?\)',
+                        tokenize_image_tag,
+                        original_markdown,
+                        flags=re.IGNORECASE
+                    )
+                    
+                    if image_token_map:
+                        logger.info(f"Page {page_num}: Tokenized {len(image_token_map)} image tags to hide from LLM")
 
                     # --- Stage 3: Translate ---
                     yield self._progress_event(
@@ -254,12 +307,12 @@ class Pipeline:
 
                     logger.info(
                         f"Page {page_num}: Sending to translation — "
-                        f"language='{target_language}', input={len(original_markdown)} chars, "
-                        f"preview: {original_markdown[:100]}..."
+                        f"language='{target_language}', input={len(tokenized_markdown)} chars, "
+                        f"preview: {tokenized_markdown[:100]}..."
                     )
 
                     translated_markdown = await self.translation_service.translate_markdown(
-                        original_markdown,
+                        tokenized_markdown,
                         target_language,
                         page_num,
                         translation_mode=translation_mode,
@@ -270,6 +323,13 @@ class Pipeline:
                         f"output={len(translated_markdown)} chars, "
                         f"preview: {translated_markdown[:100]}..."
                     )
+
+                    # --- UNTOKENIZE IMAGE TAGS ---
+                    # Restore the original crop coordinates so Reconstruction Service can use them to reference the image!
+                    if image_token_map:
+                        for token, original_tag in image_token_map.items():
+                            translated_markdown = translated_markdown.replace(token, original_tag)
+                        logger.info(f"Page {page_num}: Untokenized {len(image_token_map)} image tags into translated markdown")
 
                     # --- Stage 4: Reconstruct Layout ---
                     yield self._progress_event(
@@ -376,6 +436,8 @@ class Pipeline:
                 "error": str(e),
                 "message": f"Pipeline failed: {e}",
             }
+
+
 
     def _progress_event(
         self, job_id: str, message: str, stage: str,

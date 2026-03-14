@@ -50,6 +50,17 @@ async def lifespan(app: FastAPI):
                 deleted = job_store.cleanup_old_jobs(max_age_hours=24)
                 if deleted > 0:
                     logger.info(f"Periodic cleanup: removed {deleted} old jobs")
+                # Clean up old extracted images
+                import shutil
+                images_path = Path(settings.IMAGE_OUTPUT_DIR)
+                if images_path.exists():
+                    import time as _time
+                    for img_dir in images_path.iterdir():
+                        if img_dir.is_dir():
+                            age_hours = (_time.time() - img_dir.stat().st_mtime) / 3600
+                            if age_hours > 24:
+                                shutil.rmtree(img_dir, ignore_errors=True)
+                                logger.info(f"Cleaned up old image dir: {img_dir.name}")
             except Exception as e:
                 logger.error(f"Cleanup failed: {e}")
     
@@ -94,6 +105,7 @@ if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
+
 # Add CORS headers for static files (fonts) — CORSMiddleware doesn't cover mounted apps
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -101,7 +113,7 @@ from starlette.responses import Response
 
 
 class StaticFilesCORSMiddleware(BaseHTTPMiddleware):
-    """Ensure static file responses (especially fonts) include CORS headers."""
+    """Ensure static file responses (especially fonts and images) include CORS headers."""
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         if request.url.path.startswith("/static/"):

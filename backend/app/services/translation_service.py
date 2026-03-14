@@ -12,6 +12,7 @@ from google.genai import types
 from app.config import settings
 from app.core.exceptions import TranslationError
 from app.models.enums import get_language_name
+from app.utils.gemini_utils import call_gemini_with_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ SCRIPT_UNICODE_RANGES = {
     "Gujarati":   (0x0A80, 0x0AFF),
     "Gurmukhi":   (0x0A00, 0x0A7F),   # Punjabi
     "Oriya":      (0x0B00, 0x0B7F),   # Odia
+    "Arabic":     (0x0600, 0x06FF),   # Urdu
 }
 
 # Maps a target language to the script name it uses
@@ -54,6 +56,7 @@ LANGUAGE_TO_SCRIPT = {
     "Gujarati": "Gujarati",
     "Punjabi": "Gurmukhi",
     "Odia": "Oriya",
+    "Urdu": "Arabic",
 }
 
 # Explicit negative constraints to prevent cross-language script leakage
@@ -91,24 +94,28 @@ LANGUAGE_PURITY_RULES = {
         "STRICT LANGUAGE PURITY (CRITICAL): Your ENTIRE output MUST use ONLY Odia script (ଓଡ଼ିଆ ଲିପି). "
         "ABSOLUTELY FORBIDDEN: Bengali (বাংলা), Devanagari (हिन्दी), Telugu, Tamil characters."
     ),
+    "Marathi": (
+        "STRICT LANGUAGE PURITY (CRITICAL): Your ENTIRE output MUST use ONLY Devanagari script (देवनागरी लिपि) with Marathi vocabulary. "
+        "ABSOLUTELY FORBIDDEN: Telugu, Tamil, Kannada, Malayalam, Bengali, Gujarati characters. "
+        "Use Marathi-specific vocabulary — do NOT substitute Hindi words. Example: use 'करणे' (Marathi) not 'करना' (Hindi)."
+    ),
+    "Gujarati": (
+        "STRICT LANGUAGE PURITY (CRITICAL): Your ENTIRE output MUST use ONLY Gujarati script (ગુજરાતી લિપિ). "
+        "ABSOLUTELY FORBIDDEN: Devanagari (हिन्दी), Telugu, Tamil, Bengali characters."
+    ),
+    "Punjabi": (
+        "STRICT LANGUAGE PURITY (CRITICAL): Your ENTIRE output MUST use ONLY Gurmukhi script (ਗੁਰਮੁਖੀ ਲਿਪੀ). "
+        "ABSOLUTELY FORBIDDEN: Devanagari (हिन्दी), Telugu, Tamil, Bengali characters."
+    ),
+    "Urdu": (
+        "STRICT LANGUAGE PURITY (CRITICAL): Your ENTIRE output MUST use ONLY Arabic/Nastaliq script (اردو نستعلیق). "
+        "ABSOLUTELY FORBIDDEN: Devanagari (हिन्दी), Telugu, Tamil, Bengali characters. "
+        "Write in right-to-left Urdu script throughout."
+    ),
 }
 
 
-async def call_gemini_with_timeout(client, model, contents, config, timeout=240):
-    """Call Gemini API with timeout protection"""
-    try:
-        result = await asyncio.wait_for(
-            asyncio.to_thread(
-                client.models.generate_content,
-                model=model,
-                contents=contents,
-                config=config,
-            ),
-            timeout=timeout
-        )
-        return result
-    except asyncio.TimeoutError:
-        raise TranslationError(f"Gemini API call timed out after {timeout} seconds")
+# call_gemini_with_timeout is now imported from app.utils.gemini_utils
 
 
 class TranslationService:
@@ -217,7 +224,8 @@ class TranslationService:
 
 TASK: Translate the following extracted Markdown content from English to {target_language}.
 However, instead of just returning the translation, you must generate a BILINGUAL document. 
-For every text block (question, direction, option), output the CORRECTED English text (repairing any remaining OCR line breaks or fragments) followed immediately by its {target_language} translation on a new line.
+For EVERY question, header, instruction, or paragraph: output the ENTIRE question/text block in English first, followed by a blank line, and then the ENTIRE translated block in {target_language} immediately below it.
+You MUST interleave English and {target_language} QUESTION BY QUESTION (or paragraph by paragraph). Do NOT group all English text at the top and all {target_language} text at the bottom.
 
 TRANSLATION STYLE:
 - Generate {target_language} in FORMAL COMPETITIVE EXAMINATION style used in SSC/Banking/State PSC exams.
@@ -228,10 +236,12 @@ TRANSLATION STYLE:
 - Technical terms commonly used in exams (like "compound interest", "ratio", "percentage") should use the standard {target_language} equivalents used in government exam papers.
 
 CRITICAL RULES:
-1. Translate ALL human-readable text to {target_language} — sentences, instructions, directions, question text. Remember to keep the English version and append the {target_language} version right below it.
-2. **MERGE FRAGMENTED SENTENCES (CRITICAL)**: The input OCR text is sometimes fragmented (e.g., "i. If the \\n 1st \\n and \\n 2nd \\n digits..."). You MUST reconstruct and merge these fragments into proper, continuous English sentences BEFORE translating. Output the MERGED, repaired English sentence followed by its translation. Do NOT output fragmented English pieces line-by-line.
-3. **INLINE MATH MUST STAY INLINE**: NEVER isolate inline math, positions (e.g., `16^{{th}}`), or numbers on new lines. They MUST be embedded continuously inside the sentence. If a sentence has a number in the middle, DO NOT break the sentence.
-4. **IGNORE HEADERS/LOGOS**: Completely EXCLUDE any institute names (e.g., 'Sreedhar\\'s CCE'), logos, contact details, phone numbers, or branch addresses at the top or bottom of the page. Do NOT translate or include them in your output. Start directly with the test name, directions, or exam content.
+1. **QUESTION-BY-QUESTION INTERLEAVING**: You MUST pair the English text and its {target_language} translation together for every individual question. 
+   - **CRITICAL ORDERING**: For each question, output the English Question Text AND English Options first. Then, output the Translated Question Text AND Translated Options immediately below it.
+   - **ANTI-TRUNCATION (CRITICAL)**: You MUST translate ALL questions. Do NOT stop halfway.
+2. **MERGE FRAGMENTED SENTENCES**: The input OCR text is sometimes fragmented. Reconstruct and merge these fragments into proper, continuous English sentences BEFORE displaying the English version and generating the {target_language} translation.
+3. **INLINE MATH MUST STAY INLINE**: NEVER isolate inline math, positions (e.g., `16^{{th}}`), or numbers on new lines. They MUST be embedded continuously inside the sentence.
+4. **IGNORE HEADERS/LOGOS**: Completely EXCLUDE any institute names, logos, contact details, phone numbers, or branch addresses at the top or bottom of the page. Do NOT translate or include them in your output. Start directly with the test name, directions, or exam content.
 5. **TABLE TRANSLATION**: Tables are critical — follow these rules strictly:
    - PRESERVE the Markdown table pipe syntax EXACTLY: `| header1 | header2 |`, `|---|---|`, `| data1 | data2 |`.
    - Create BILINGUAL cells inside the table by putting the English text and the {target_language} text in the same cell separated by `<br>`.
@@ -239,18 +249,39 @@ CRITICAL RULES:
    - DO NOT break the table structure — each row must have the same number of `|` pipes.
    - Example: `| Year | Students |` → `| Year<br>సంవత్సరం | Students<br>విద్యార్థులు |` (for Telugu)
 6. PRESERVE all Markdown formatting exactly (headers, bold, italic, lists, links, table syntax).
-7. **MCQ OPTIONS (MULTIPLE CHOICE QUESTIONS)**: For options like `A) Option text` or `1) Option text`, you MUST output BOTH the English version and the {target_language} version. Keep the option label (`A)`, `1)`, etc.) unchanged but attach the translation to it.
-   - Example: 
+7. **MCQ OPTIONS (MULTIPLE CHOICE QUESTIONS)**: For options like `A) Option text`, you MUST output English options WITH the English Question Text, and {target_language} options WITH the {target_language} Question Text.
+
+EXAMPLE OUTPUT FORMAT:
+[English Question 1 Text]
+[English Question 1 Options]
+
+[Translated {target_language} Question 1 Text]
+[Translated {target_language} Question 1 Options]
+
+[English Question 2 Text]
+[English Question 2 Options]
+
+[Translated {target_language} Question 2 Text]
+[Translated {target_language} Question 2 Options]
+
+   - Example CORRECT Format for Options:
      `A) Rangbang`
-     `A) รังบัง` (translation in the target language)
-8. **PRESERVE IMAGE TAGS**: Keep ALL image references in the format `![image](crop:[ymin, xmin, ymax, xmax])` EXACTLY as they appear. Do NOT modify, translate, or remove these tags. They are critical for image embedding.
+     `B) Another Option`
+     `C) Third Option`
+     `D) Fourth Option`
+     
+     `A)` (translation of Rangbang in {target_language})
+     `B)` (translation of Another Option in {target_language})
+     `C)` (translation of Third Option in {target_language})
+     `D)` (translation of Fourth Option in {target_language})
+8. **PRESERVE IMAGE TOKENS**: You will see image layout tokens in the text like `<IMG_1234ABCD>`. These represent complex diagrams or tables. You MUST copy these exact tokens into BOTH your English and {target_language} output at the exact location where they visually belong.
 9. DO NOT translate mathematical symbols, formulas, numbers, dates, measurements, and proper nouns (SBI, RBI, LIC etc.).
 10. **FIX MATH FRACTIONS**: OCR sometimes badly extracts visual fractions as `33^1 \\underline{{3}}` or `33^1_3`. Fix these into proper LaTeX: `$33\\frac{{1}}{{3}}$`.
 11. **MATH EXPRESSIONS**: Wrap ALL mathematical expressions, equations, and formulas in LaTeX `$...$`. Examples:
    - `? × 65 ÷ 72 = 195 × 352 ÷ 192` → `$? \\times 65 \\div 72 = 195 \\times 352 \\div 192$`
    - `√256 × ³√1728 = ? × ⁴√4096` → `$\\sqrt{{256}} \\times \\sqrt[3]{{1728}} = ? \\times \\sqrt[4]{{4096}}$`
    - `35% of 180 + 18² = (27)^(5/3) + ?²` → `$35\\% \\text{{ of }} 180 + 18^2 = (27)^{{5/3}} + ?^2$`
-12. PRESERVE the exact order, structure, and spacing of content. Stack the BILINGUAL content as `English Version \\n {target_language} Version`. Do not mix them in the same line unless it is inside a table cell.
+12. PRESERVE the exact order, structure, and spacing of content. Ensure the FULL English text block comes first, followed by the FULL {target_language} text block. Do not mix them sentence-by-sentence.
 13. Keep question numbers (Q1, Q2, 31., 32., etc.) unchanged. Keep one question number for both the English and the target language translation (e.g., `31. ` before the English text, and no number before the translated text).
 14. Output ONLY the BILINGUAL Markdown — no explanations, no wrapping!
 15. **HYBRID MATH / ENGLISH OPERATORS**: If a mathematical equation contains English connecting words like 'of' (e.g., `35% of 180` or `?% of 135`), DO NOT translate the word 'of' into {target_language}. Treat the entire string as a rigid math formula and wrap it in MathJax: `$35\\% \\text{{ of }} 180$`.
@@ -307,8 +338,8 @@ CRITICAL RULES:
    - Example: `| Year | Students |` → `| సంవత్సరం | విద్యార్థులు |` (for Telugu)
 6. PRESERVE all Markdown formatting exactly (headers, bold, italic, lists, links, table syntax).
 7. **MCQ OPTIONS (MULTIPLE CHOICE QUESTIONS)**: For options like `A) Option text` or `1) Option text`, you MUST output ONLY the {target_language} version. Keep the option label (`A)`, `1)`, etc.) unchanged.
-   - Example: `A) Rangbang` → `A) รังบัง` (translation in the target language)
-8. **PRESERVE IMAGE TAGS**: Keep ALL image references in the format `![image](crop:[ymin, xmin, ymax, xmax])` EXACTLY as they appear. Do NOT modify, translate, or remove these tags. They are critical for image embedding.
+    - Example: `A) Rangbang` → `A)` (translated text in {target_language})
+8. **PRESERVE IMAGE TOKENS**: You will see image layout tokens in the text like `<IMG_1234ABCD>`. These represent complex diagrams or tables. You MUST copy these exact tokens into your {target_language} output at the exact location where they visually belong.
 9. DO NOT translate mathematical symbols, formulas, numbers, dates, measurements, and proper nouns (SBI, RBI, LIC etc.).
 10. **FIX MATH FRACTIONS**: OCR sometimes badly extracts visual fractions as `33^1 \\underline{{3}}` or `33^1_3`. Fix these into proper LaTeX: `$33\\frac{{1}}{{3}}$`.
 11. **MATH EXPRESSIONS**: Wrap ALL mathematical expressions, equations, and formulas in LaTeX `$...$`. Examples:
@@ -366,8 +397,9 @@ TRANSLATED CONTENT IN {target_language} ONLY:"""
         return text, violations
 
     async def _execute_translation_call(self, prompt: str, page_number: int, target_language: str, content_length: int) -> str:
-        max_attempts = 2
+        max_attempts = 3
         last_violations = []
+        current_prompt = prompt
 
         for attempt in range(1, max_attempts + 1):
             try:
@@ -376,13 +408,13 @@ TRANSLATED CONTENT IN {target_language} ONLY:"""
                     f"({content_length} chars) — attempt {attempt}/{max_attempts}..."
                 )
 
-                # Use lower temperature on retry for more deterministic output
-                temperature = 0.1 if attempt == 1 else 0.05
+                # Use lower temperature on retries for more deterministic output
+                temperature = 0.1 if attempt == 1 else (0.05 if attempt == 2 else 0.02)
 
                 response = await call_gemini_with_timeout(
                     self.client,
                     self.model,
-                    prompt,
+                    current_prompt,
                     types.GenerateContentConfig(
                         temperature=temperature,
                         max_output_tokens=settings.GEMINI_MAX_OUTPUT_TOKENS,
@@ -416,9 +448,20 @@ TRANSLATED CONTENT IN {target_language} ONLY:"""
                     last_violations = violations
 
                     if attempt < max_attempts:
-                        # Retry with the cleaned text hint
+                        # Build a stronger retry prompt with explicit violation feedback
+                        violation_feedback = (
+                            f"\n\nCRITICAL CORRECTION — YOUR PREVIOUS OUTPUT CONTAINED ERRORS:\n"
+                            f"Your previous translation included characters from WRONG scripts: "
+                            f"{'; '.join(violations)}.\n"
+                            f"You MUST output ONLY {target_language} script characters.\n"
+                            f"Here is your cleaned output for reference — fix the contaminated parts "
+                            f"and re-translate properly:\n---\n{cleaned[:2000]}\n---\n"
+                            f"Output the CORRECTED translation in PURE {target_language} only:"
+                        )
+                        current_prompt = prompt + violation_feedback
                         logger.info(
-                            f"Page {page_number}: Retrying translation with stricter parameters..."
+                            f"Page {page_number}: Retrying with violation feedback "
+                            f"(augmented prompt by {len(violation_feedback)} chars)..."
                         )
                         continue
                     else:
@@ -443,6 +486,11 @@ TRANSLATED CONTENT IN {target_language} ONLY:"""
 
             except TranslationError:
                 raise
+            except TimeoutError as e:
+                logger.error(f"Translation timed out for page {page_number}: {str(e)}")
+                if attempt == max_attempts:
+                    raise TranslationError(f"Failed to translate page {page_number}: {str(e)}")
+                logger.info(f"Page {page_number}: Retrying after timeout...")
             except Exception as e:
                 logger.error(f"Translation failed for page {page_number}: {str(e)}")
                 if attempt == max_attempts:
