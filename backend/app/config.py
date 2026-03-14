@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     # Storage
     UPLOAD_DIR: str = "./uploads"
     OUTPUT_DIR: str = "./outputs"
+    IMAGE_OUTPUT_DIR: str = "./outputs/images"
 
     # Pipeline settings
     GLM_OCR_MAX_PAGES_PER_REQUEST: int = 50  # Split large PDFs into chunks
@@ -45,7 +46,7 @@ class Settings(BaseSettings):
     MAX_UPLOAD_SIZE_MB: int = 500  # Allow very large PDFs
 
     # Rendering & OCR Tuning
-    RENDER_DPI: int = 200  # DPI for rendering PDF pages (200 = good balance for local model OCR quality)
+    RENDER_DPI: int = 300  # Increased to 300 for high-quality clean image crops
     OCR_MAX_IMAGE_DIM: int = 1200  # Max image dimension for GLM-OCR API (smaller = faster remote processing)
     GEMINI_MAX_OUTPUT_TOKENS: int = 16384  # Max output tokens for Gemini reconstruction
     CROP_PADDING: int = 15  # Base padding around image crops (0-1000 scale) - now adaptive
@@ -63,3 +64,4 @@ settings = Settings()
 # Ensure directories exist
 Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
 Path(settings.OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
+Path(settings.IMAGE_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
